@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 #TODO: DEBUGGING: nn, ELSE: .nn
-from nn import (
+from .nn import (
     checkpoint,
     conv_nd,
     linear,
@@ -14,7 +14,6 @@ from nn import (
     zero_module,
     normalization,
     timestep_embedding,
-    #TODO: NAFBLOCK
     LayerNorm2d
 )
 
@@ -379,28 +378,39 @@ class QKVAttention(nn.Module):
         return count_flops_attn(model, _x, y)
 
 
-class NAFBlock(nn.Module):
-    def __init__(self, c, DW_Expand=2, FFN_Expand=2, drop_out_rate=0.):
+class NAFBlock(TimestepBlock):
+    def __init__(
+        self, 
+        c,
+        emb_channels,
+        DW_Expand=2, 
+        FFN_Expand=2,
+        drop_out_rate=0.,
+        use_scale_shift_norm=False,
+        use_checkpoint=False,
+        dims=2,
+    ):
         super().__init__()
+        self.use_checkpoint = use_checkpoint
+        self.use_scale_shift_norm = use_scale_shift_norm
+
         dw_channel = c * DW_Expand
-        self.conv1 = nn.Conv2d(in_channels=c, out_channels=dw_channel, kernel_size=1, padding=0, stride=1, groups=1, bias=True)
-        self.conv2 = nn.Conv2d(in_channels=dw_channel, out_channels=dw_channel, kernel_size=3, padding=1, stride=1, groups=dw_channel,
-                               bias=True)
-        self.conv3 = nn.Conv2d(in_channels=dw_channel // 2, out_channels=c, kernel_size=1, padding=0, stride=1, groups=1, bias=True)
+        self.conv1 = conv_nd(dims, c, dw_channel, 1, padding=0, stride=1, groups=1, bias=True)
+        self.conv2 = conv_nd(dims, dw_channel, dw_channel, 3, padding=1, stride=1, groups=dw_channel, bias=True)
+        self.conv3 = conv_nd(dims, dw_channel // 2, c, 1, padding=0, stride=1, groups=1, bias=True)
         
         # Simplified Channel Attention
         self.sca = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels=dw_channel // 2, out_channels=dw_channel // 2, kernel_size=1, padding=0, stride=1,
-                      groups=1, bias=True),
+            conv_nd(dims, dw_channel // 2, dw_channel // 2, 1, padding=0, stride=1, groups=1, bias=True),
         )
 
         # SimpleGate
         self.sg = SimpleGate()
 
         ffn_channel = FFN_Expand * c
-        self.conv4 = nn.Conv2d(in_channels=c, out_channels=ffn_channel, kernel_size=1, padding=0, stride=1, groups=1, bias=True)
-        self.conv5 = nn.Conv2d(in_channels=ffn_channel // 2, out_channels=c, kernel_size=1, padding=0, stride=1, groups=1, bias=True)
+        self.conv4 = conv_nd(dims, c, ffn_channel, 1, padding=0, stride=1, groups=1, bias=True)
+        self.conv5 = conv_nd(dims, ffn_channel // 2, c, 1, padding=0, stride=1, groups=1, bias=True)
 
         self.norm1 = LayerNorm2d(c)
         self.norm2 = LayerNorm2d(c)
@@ -411,28 +421,47 @@ class NAFBlock(nn.Module):
         self.beta = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
         self.gamma = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
 
-    def forward(self, inp):
-        x = inp
+        # emb_layers          
+        self.emb_layers = nn.Sequential(
+            nn.SiLU(),
+            linear(
+                emb_channels,
+                2 * c if use_scale_shift_norm else c,
+            ),
+        )
 
-        x = self.norm1(x)
+    def forward(self, x, emb):
+        return checkpoint(self._forward, (x, emb), self.parameters(), self.use_checkpoint)
 
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.sg(x)
-        x = x * self.sca(x)
-        x = self.conv3(x)
+    def _forward(self, x, emb):
+        h = self.norm1(x)
 
-        x = self.dropout1(x)
+        emb_out = self.emb_layers(emb).type(x.dtype)
+        while len(emb_out.shape) < len(h.shape):
+            emb_out = emb_out[..., None]
+        if self.use_scale_shift_norm:
+            scale, shift = torch.chunk(emb_out, 2, dim=1)
+            h = h * (1 + scale) + shift
+        else:
+            h = h + emb_out
 
-        y = inp + x * self.beta
+        h = self.conv1(h)
+        h = self.conv2(h)
+        h = self.sg(h)
 
-        x = self.conv4(self.norm2(y))
-        x = self.sg(x)
-        x = self.conv5(x)
+        h = x * self.sca(h)
+        h = self.conv3(h)
+        h = self.dropout1(h)
 
-        x = self.dropout2(x)
+        y = x + h * self.beta
 
-        return y + x * self.gamma
+        z = self.norm2(y)
+        z = self.conv4(z)
+        z = self.sg(z)
+        z = self.conv5(z)
+        z = self.dropout2(z)
+
+        return y + z * self.gamma
 
 
 class UNetModel(nn.Module):
@@ -751,10 +780,16 @@ class NAFNetModel(nn.Module):
         self.output_blocks = nn.ModuleList([])
 
         # Encoder 
-        for _, num in enumerate(enc_blk_nums):
+        for num in enc_blk_nums:
             for _ in range(num_naf_blocks*num):
                 self.input_blocks.append(TimestepEmbedSequential(
-                    NAFBlock(ch, drop_out_rate=dropout)
+                    NAFBlock(
+                        ch, 
+                        time_embed_dim,
+                        drop_out_rate=dropout,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                        use_checkpoint=use_checkpoint,
+                    )
                 ))
             
             self.input_blocks.append(TimestepEmbedSequential(
@@ -765,28 +800,39 @@ class NAFNetModel(nn.Module):
         # Middle
         for _ in range(num_naf_blocks*middle_blk_num):
             self.middle_blocks.append(TimestepEmbedSequential(
-                NAFBlock(ch, drop_out_rate=dropout)
+                NAFBlock(
+                    ch, 
+                    time_embed_dim,
+                    drop_out_rate=dropout,
+                    use_scale_shift_norm=use_scale_shift_norm,
+                    use_checkpoint=use_checkpoint,
+                )
             ))
 
         # Decoder
-        for _, num in enumerate(dec_blk_nums):
+        for num in dec_blk_nums:
             self.output_blocks.append(
                 TimestepEmbedSequential(
                     conv_nd(dims, ch, ch * 2, 1, bias=False),
                     nn.PixelShuffle(2)
             ))
-
             ch = ch // 2
             for _ in range(num_naf_blocks*num):
                 self.output_blocks.append(TimestepEmbedSequential(
-                    NAFBlock(ch, drop_out_rate=dropout)
+                    NAFBlock(
+                        ch, 
+                        time_embed_dim,
+                        drop_out_rate=dropout,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                        use_checkpoint=use_checkpoint,
+                    )
                 ))
 
-        # self.padder_size = 2 ** len(self.encoders)
 
         self.output_blocks.append(TimestepEmbedSequential(
             zero_module(conv_nd(dims, ch, out_channels, 3, padding=1))
         ))
+
 
     def forward(self, x, timesteps, xT=None, y=None):
         if self.condition_mode == "concat":
@@ -797,8 +843,6 @@ class NAFNetModel(nn.Module):
         # ), "must specify y if and only if the model is class-conditional"
 
         hs = []
-
-        timesteps = timesteps.to(self.dtype)
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:
@@ -809,7 +853,7 @@ class NAFNetModel(nn.Module):
         h = self.input_blocks[0](h, emb)
 
         enc = 1
-        for level, num in enumerate(self.enc_blk_nums):
+        for num in self.enc_blk_nums:
             for _ in range(num*self.num_naf_blocks):
                 h = self.input_blocks[enc](h, emb)
                 enc += 1

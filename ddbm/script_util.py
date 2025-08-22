@@ -202,8 +202,6 @@ def create_model(
         )
 
     elif unet_type == "naf":
-        #TODO: Debugging
-        print('NAFNet')
         return NAFNetModel(
             image_size=image_size,
             in_channels=in_channels,

@@ -146,6 +146,8 @@ def create_argparser():
         use_augment=False,
         pretrained_ckpt=None,
         train_mode="ddbm",
+        # TODO: unet_type
+        unet_type="naf",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

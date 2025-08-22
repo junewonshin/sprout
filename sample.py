@@ -79,6 +79,8 @@ def main():
         raise NotImplementedError
     args.num_samples = len(dataloader.dataset)
     num = 0
+    #TODO: _getItem_ RETURN S2, S2_CLOUDY, (S1, PDX) -> NEED TO MATCH 
+    #TODO: data = [S2, S2_CLOUDY, (S1, PDX)]
     for i, data in enumerate(dataloader):
 
         x0_image = data[0]
@@ -97,7 +99,7 @@ def main():
         else:
             mask = None
 
-        indexes = data[2][0].numpy()
+        indexes = data[2][1].numpy()
         sample, path, nfe, pred_x0, sigmas, _ = karras_sample(
             diffusion,
             model,

@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 
 
-# TODO: NAFBlock
 class LayerNormFunction(torch.autograd.Function):
 
     @staticmethod

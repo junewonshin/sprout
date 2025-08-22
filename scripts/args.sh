@@ -14,7 +14,7 @@ if [[ $DATASET_NAME == "e2h" ]]; then
     MICRO_BS=64
     DROPOUT=0.1
     CLASS_COND=False
-    UNET_TYPE='adm'
+    UNET_TYPE="adm"
 
     PRED="vp"
 elif [[ $DATASET_NAME == "diode" ]]; then
@@ -32,7 +32,7 @@ elif [[ $DATASET_NAME == "diode" ]]; then
     DROPOUT=0.1
     CLASS_COND=False
 
-    UNET_TYPE='adm'
+    UNET_TYPE="adm"
 
     PRED="vp"
 elif [[ $DATASET_NAME == "imagenet_inpaint_center" ]]; then
@@ -67,31 +67,28 @@ elif [[ $DATASET_NAME == "imagenet_inpaint_center" ]]; then
 #     SAVE_ITER=20000
 #     MICRO_BS=16
 #     DROPOUT=0.1
-    # CLASS_COND=FALSE
-    UNET_TYPE='adm'
-
-
+    # CLASS_COND=False
+    # UNET_TYPE='adm'
 #     PRED="vp"
 
-#TODO: NAFNet
+#TODO: NAFNet, NUM_RES_BLOCKS=NUM_NAF_BLOCKS
 elif [[ $DATASET_NAME == "sen12mscr" ]]; then
     DATA_DIR=/home/work/dataset/SEN12MSCR
     DATASET=sen12mscr
     IMG_SIZE=256
 
-    NUM_CH=32
-    NUM_NAF_BLOCKS=2
-    ATTN_TYPE=FALSE
+    NUM_CH=64
+    NUM_RES_BLOCKS=2
+    ATTN_TYPE=False
 
-    EXP="sen12mscr_naf${IMG_SIZE}_${NUM_CH}d"
+    EXP="sen12mscr${IMG_SIZE}_${NUM_CH}d"
     SAVE_ITER=20000
     MICRO_BS=16
     DROPOUT=0.1
-    CLASS_COND=FALSE
-    UNET_TYPE='naf'
+    CLASS_COND=False
+    UNET_TYPE="naf"
 
-    PRED="VP"
-
+    PRED="vp"
 fi
     
 if  [[ $PRED == "ve" ]]; then

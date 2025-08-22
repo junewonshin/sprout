@@ -24,6 +24,7 @@ run_args="--nproc_per_node 2 \
 
 MICRO_BS=16
 
+
 torchrun $run_args train.py --exp=$EXP \
  --class_cond $CLASS_COND  \
  --dropout $DROPOUT  --microbatch $MICRO_BS \
@@ -33,7 +34,6 @@ torchrun $run_args train.py --exp=$EXP \
  --use_new_attention_order $ATTN_TYPE  \
  ${BETA_D:+ --beta_d="${BETA_D}"} ${BETA_MIN:+ --beta_min="${BETA_MIN}"} ${BETA_MAX:+ --beta_max="${BETA_MAX}"}  \
  --data_dir=$DATA_DIR --dataset=$DATASET  \
- --sigma_max=$SIGMA_MAX --sigma_min=$SIGMA_MIN  \
+ --sigma_max=$SIGMA_MAX --sigma_min=$SIGMA_MIN  --unet_type=$UNET_TYPE\
  --save_interval_for_preemption=$FREQ_SAVE_ITER --save_interval=$SAVE_ITER --debug=False \
- --unet_type=$UNET_TYPE
 #  ${CKPT:+ --resume_checkpoint="${CKPT}"} 
