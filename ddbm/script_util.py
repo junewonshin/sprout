@@ -46,18 +46,17 @@ def model_and_diffusion_defaults():
         beta_min=0.1,
         beta_max=1.0,
         cov_xy=0.0,
-        image_size=64,
+        image_size=256,
         # TODO: in_channels
         in_channels=13,
-        num_channels=128,
+        num_channels=32,
         num_res_blocks=2,
         num_heads=4,
         num_heads_upsample=-1,
-        num_head_channels=64,
+        num_head_channels=32,
         # TODO: adm: UNet, naf: NAFNet
         unet_type="naf",
-        # TODO: 16, 8
-        attention_resolutions="16,8",
+        attention_resolutions="32,16,8",
         channel_mult="",
         dropout=0.0,
         class_cond=False,
@@ -121,6 +120,7 @@ def create_model_and_diffusion(
         condition_mode=condition_mode,
     )
     if noise_schedule.startswith("vp"):
+        print("VP")
         ns = VPNoiseSchedule(beta_d=beta_d, beta_min=beta_min)
         precond = DDBMPreCond(ns, sigma_data=sigma_data, cov_xy=cov_xy)
     elif noise_schedule == "ve":
@@ -212,11 +212,15 @@ def create_model(
             middle_blk_num=6,
             enc_blk_nums=[1, 1, 2, 4],
             dec_blk_nums=[1, 1, 1, 1],
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
             # num_classes=(NUM_CLASSES if class_cond else None),
             use_checkpoint=use_checkpoint,
             use_fp16=use_fp16,
             use_scale_shift_norm=use_scale_shift_norm,
+            use_new_attention_order=use_new_attention_order,
             condition_mode=condition_mode,
+
         )
     else:
         raise ValueError(f"Unsupported unet type: {unet_type}")

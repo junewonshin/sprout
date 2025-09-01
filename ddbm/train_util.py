@@ -164,6 +164,7 @@ class TrainLoop:
                     _, mask, label = _
                 else:
                     mask = None
+                    sar, pdx = _
 
                 if not (not self.lr_anneal_steps or self.step < self.total_training_steps):
                     # Save the last checkpoint if it wasn't already saved.
@@ -174,7 +175,7 @@ class TrainLoop:
                 if self.augment is not None:
                     batch, _ = self.augment(batch)
                 if isinstance(cond, torch.Tensor) and batch.ndim == cond.ndim:
-                    cond = {"xT": cond}
+                    cond = {"xT": cond, "y": sar}
                 else:
                     cond["xT"] = cond["xT"]
                 if mask is not None:
@@ -199,8 +200,9 @@ class TrainLoop:
                         _, mask, label = _
                     else:
                         mask = None
+                        sar, pdx = _
                     if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
-                        test_cond = {"xT": test_cond}
+                        test_cond = {"xT": test_cond, "y": sar}
                     else:
                         test_cond["xT"] = test_cond["xT"]
                     if mask is not None:

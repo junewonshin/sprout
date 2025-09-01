@@ -53,13 +53,13 @@ elif [[ $DATASET_NAME == "imagenet_inpaint_center" ]]; then
 
     PRED="i2sb_cond"
 
-#TODO: Uet
+#TODO: Unet
 # elif [[ $DATASET_NAME == "sen12mscr" ]]; then
 #     DATA_DIR=/home/work/dataset/SEN12MSCR
 #     DATASET=sen12mscr
 #     IMG_SIZE=256
 
-#     NUM_CH=128
+#     NUM_CH=64
 #     NUM_RES_BLOCKS=2
 #     ATTN_TYPE=True
 
@@ -67,8 +67,8 @@ elif [[ $DATASET_NAME == "imagenet_inpaint_center" ]]; then
 #     SAVE_ITER=20000
 #     MICRO_BS=16
 #     DROPOUT=0.1
-    # CLASS_COND=False
-    # UNET_TYPE='adm'
+#     CLASS_COND=False
+#     UNET_TYPE="adm"
 #     PRED="vp"
 
 #TODO: NAFNet, NUM_RES_BLOCKS=NUM_NAF_BLOCKS
@@ -77,18 +77,18 @@ elif [[ $DATASET_NAME == "sen12mscr" ]]; then
     DATASET=sen12mscr
     IMG_SIZE=256
 
-    NUM_CH=64
+    NUM_CH=32
     NUM_RES_BLOCKS=2
-    ATTN_TYPE=False
+    ATTN_TYPE=True
 
     EXP="sen12mscr${IMG_SIZE}_${NUM_CH}d"
     SAVE_ITER=20000
-    MICRO_BS=16
-    DROPOUT=0.1
+    MICRO_BS=2
+    DROPOUT=0
     CLASS_COND=False
     UNET_TYPE="naf"
-
     PRED="vp"
+
 fi
     
 if  [[ $PRED == "ve" ]]; then

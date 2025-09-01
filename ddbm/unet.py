@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-#TODO: DEBUGGING: nn, ELSE: .nn
 from .nn import (
     checkpoint,
     conv_nd,
@@ -293,6 +292,59 @@ class AttentionBlock(nn.Module):
         h = self.attention(qkv)
         h = self.proj_out(h)
         return (x + h).reshape(b, c, *spatial)
+    
+
+# ADD: Cross Attention Block 
+class CrossAttentionBlock(nn.Module):
+
+    def __init__(
+        self,
+        channels,
+        num_heads=1,
+        num_head_channels=-1,
+        use_checkpoint=False,
+        use_new_attention_order=False,
+    ):
+        super().__init__()
+        self.channels = channels
+        if num_head_channels == -1:
+            self.num_heads = num_heads
+        else:
+            assert channels % num_head_channels == 0, f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            self.num_heads = channels // num_head_channels
+        self.use_checkpoint = use_checkpoint
+
+        self.q_norm = normalization(channels)
+        self.kv_norm = normalization(channels)
+
+        self.q = conv_nd(1, channels, channels, 1)
+        self.kv = conv_nd(1, channels, channels*2, 1)
+        
+        if use_new_attention_order:
+            self.attention = QKVCrossAttention(self.num_heads)
+        # else:
+            # split heads before split qkv
+            # self.attention = QKVAttentionLegacy(self.num_heads)
+
+        self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
+
+    def forward(self, x, cond):
+        return checkpoint(self._forward, (x,cond), self.parameters(), self.use_checkpoint)
+
+    def _forward(self, x, cond):
+        b, c, *spatial = x.shape
+        assert c == self.channels, f"Q ch {c} != block {self.channels}"
+        assert x.shape == cond.shape, f"x.shape != cond.shape"
+        # Reshape
+        x = x.reshape(b, c, -1)  # Batchsize, Channels, 256*256
+        cond = cond.reshape(b, c, -1)
+        # Norm -> Proj
+        q = self.q(self.q_norm(x))
+        kv = self.kv(self.kv_norm(cond))
+        # out
+        h = self.attention(q, kv)
+        h = self.proj_out(h)
+        return (x + h).reshape(b, c, *spatial)
 
 
 def count_flops_attn(model, _x, y):
@@ -335,6 +387,31 @@ class QKVAttentionLegacy(nn.Module):
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
         q, k, v = qkv.reshape(bs * self.n_heads, ch * 3, length).split(ch, dim=1)
+        q, k, v = q.transpose(-2, -1), k.transpose(-2, -1), v.transpose(-2, -1)
+        a = F.scaled_dot_product_attention(q, k, v)
+        return a.transpose(-2, -1).reshape(bs, -1, length)
+
+    @staticmethod
+    def count_flops(model, _x, y):
+        return count_flops_attn(model, _x, y)
+
+
+# ADD:Multi-modal Cross Attention
+class QKVCrossAttention(nn.Module):
+    def __init__(self, n_heads):
+        super().__init__()
+        self.n_heads = n_heads
+
+    def forward(self, q, kv):
+        bs, width, length = q.shape
+        ch = width // self.n_heads
+
+        k, v = kv.chunk(2, dim=1)
+
+        q = q.reshape(bs*self.n_heads, ch, length)
+        k = k.reshape(bs*self.n_heads, ch, length)
+        v = v.reshape(bs*self.n_heads, ch, length)
+        
         q, k, v = q.transpose(-2, -1), k.transpose(-2, -1), v.transpose(-2, -1)
         a = F.scaled_dot_product_attention(q, k, v)
         return a.transpose(-2, -1).reshape(bs, -1, length)
@@ -554,7 +631,10 @@ class UNetModel(nn.Module):
         ch = input_ch = int(channel_mult[0] * model_channels)
         in_channels = in_channels * 2 if condition_mode == "concat" else in_channels
 
+        self.attn_cnt = {i: 1 * self.num_res_blocks for i in attention_resolutions}
         self.input_blocks = nn.ModuleList([TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))])
+        self.input_cond_blocks = nn.ModuleList([TimestepEmbedSequential(conv_nd(dims, 2, ch, 3, padding=1))])
+        self.attn_blocks = nn.ModuleList([])
         self._feature_size = ch
         input_block_chans = [ch]
         ds = 1
@@ -571,6 +651,18 @@ class UNetModel(nn.Module):
                         use_scale_shift_norm=use_scale_shift_norm,
                     )
                 ]
+                sar_layers = [
+                    ResBlock(
+                        ch,
+                        time_embed_dim,
+                        dropout,
+                        out_channels=int(mult * model_channels),
+                        dims=dims,
+                        use_checkpoint=use_checkpoint,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                    )
+                ]
+
                 ch = int(mult * model_channels)
                 if ds in attention_resolutions:
                     layers.append(
@@ -582,12 +674,49 @@ class UNetModel(nn.Module):
                             use_new_attention_order=use_new_attention_order,
                         )
                     )
+                    sar_layers.append(
+                        AttentionBlock(
+                            ch,
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads,
+                            num_head_channels=num_head_channels,
+                            use_new_attention_order=use_new_attention_order,
+                        )
+                    )
+                    self.attn_blocks.append(
+                        CrossAttentionBlock(
+                            ch, 
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads,
+                            num_head_channels=num_head_channels,
+                            use_new_attention_order=use_new_attention_order,
+                        )
+                    )                
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
+                self.input_cond_blocks.append(TimestepEmbedSequential(*sar_layers))
+
                 self._feature_size += ch
                 input_block_chans.append(ch)
+
             if level != len(channel_mult) - 1:
                 out_ch = ch
                 self.input_blocks.append(
+                    TimestepEmbedSequential(
+                        ResBlock(
+                            ch,
+                            time_embed_dim,
+                            dropout,
+                            out_channels=out_ch,
+                            dims=dims,
+                            use_checkpoint=use_checkpoint,
+                            use_scale_shift_norm=use_scale_shift_norm,
+                            down=True,
+                        )
+                        if resblock_updown
+                        else Downsample(ch, conv_resample, dims=dims, out_channels=out_ch)
+                    )
+                )
+                self.input_cond_blocks.append(
                     TimestepEmbedSequential(
                         ResBlock(
                             ch,
@@ -708,13 +837,32 @@ class UNetModel(nn.Module):
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:
+            print("self.num_classes is not None")
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
 
         h = x.to(self.dtype)
-        for module in self.input_blocks:
-            h = module(h, emb)
+        s = y.to(self.dtype)
+        
+        attn = 0
+        ds = 1
+        ds_flag = self.image_size
+        attn_budget = dict(self.attn_cnt)
+        for idx in range(len(self.input_blocks)):
+
+            h = self.input_blocks[idx](h, emb)
+            s = self.input_cond_blocks[idx](s, emb)
+            if ds in self.attention_resolutions and attn_budget[ds] > 0:
+                h = self.attn_blocks[attn](h, s)
+                attn += 1
+                attn_budget[ds] -= 1
+
+            if ds_flag != h.shape[-1]:
+                ds_flag = h.shape[-1]
+                ds *= 2
+
             hs.append(h)
+
         h = self.middle_block(h, emb)
         for module in self.output_blocks:
             h = torch.cat([h, hs.pop()], dim=1)
@@ -743,6 +891,9 @@ class NAFNetModel(nn.Module):
         use_fp16=False,
         use_scale_shift_norm=False,
         condition_mode=None,
+        num_heads=1,
+        num_head_channels=-1,
+        use_new_attention_order=False,
     ):
         super().__init__()
 
@@ -776,6 +927,11 @@ class NAFNetModel(nn.Module):
         self.input_blocks = nn.ModuleList([TimestepEmbedSequential(
             conv_nd(dims, in_channels, ch, 3, padding=1))])
         
+
+        self.input_cond_blocks = nn.ModuleList([TimestepEmbedSequential(
+            conv_nd(dims, 2, ch, 3, padding=1))])
+        
+        self.attn_blocks = nn.ModuleList([])
         self.middle_blocks = nn.ModuleList([])
         self.output_blocks = nn.ModuleList([])
 
@@ -791,9 +947,31 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 ))
-            
+
+                self.input_cond_blocks.append(TimestepEmbedSequential(
+                    NAFBlock(
+                        ch,
+                        time_embed_dim,
+                        drop_out_rate=dropout,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                        use_checkpoint=use_checkpoint,
+                    )
+                ))
+            self.attn_blocks.append(
+                CrossAttentionBlock(
+                    ch, 
+                    use_checkpoint=use_checkpoint,
+                    num_heads=num_heads,
+                    num_head_channels=num_head_channels,
+                    use_new_attention_order=use_new_attention_order,
+                )
+            )
+            # downsampling
             self.input_blocks.append(TimestepEmbedSequential(
                 conv_nd(dims, ch, ch * 2, 2, 2)
+            ))
+            self.input_cond_blocks.append(TimestepEmbedSequential(
+                conv_nd(dims, ch, ch*2, 2, 2)
             ))
             ch = ch * 2
 
@@ -833,7 +1011,7 @@ class NAFNetModel(nn.Module):
             zero_module(conv_nd(dims, ch, out_channels, 3, padding=1))
         ))
 
-
+    # y = SAR
     def forward(self, x, timesteps, xT=None, y=None):
         if self.condition_mode == "concat":
             x = torch.cat([x, xT], dim=1)
@@ -843,22 +1021,34 @@ class NAFNetModel(nn.Module):
         # ), "must specify y if and only if the model is class-conditional"
 
         hs = []
+        timesteps = timesteps.to(self.dtype)
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
         if self.num_classes is not None:
+            print("self.num_classes is not None")
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
 
         h = x.to(self.dtype)
+        s = y.to(self.dtype)
+        
+        # input embedding
         h = self.input_blocks[0](h, emb)
-
+        s = self.input_cond_blocks[0](s, emb)
         enc = 1
-        for num in self.enc_blk_nums:
+        for i, num in enumerate(self.enc_blk_nums):
             for _ in range(num*self.num_naf_blocks):
                 h = self.input_blocks[enc](h, emb)
+                s = self.input_cond_blocks[enc](s, emb)
                 enc += 1
+            
+            # cross-attention
+            h = self.attn_blocks[i](h, s)
             hs.append(h)
+
+            # downsampling
             h = self.input_blocks[enc](h, emb)
+            s = self.input_cond_blocks[enc](s, emb)
             enc += 1
         
         for modules in self.middle_blocks:
@@ -881,6 +1071,7 @@ class NAFNetModel(nn.Module):
 
 
 if __name__=="__main__":
+    
     import torch
     from torchinfo import summary
     from ddbm.unet import UNetModel, NAFNetModel
@@ -888,10 +1079,10 @@ if __name__=="__main__":
     # model = UNetModel(
     #     image_size=256,
     #     in_channels=13,
-    #     model_channels=128,
+    #     model_channels=64,
     #     out_channels=13,
     #     num_res_blocks=2,
-    #     attention_resolutions=[16,8],
+    #     attention_resolutions=[16,8,4],
     #     dropout=0.1,
     #     channel_mult=(1, 1, 2, 2, 4, 4),
     #     conv_resample=True,
@@ -899,11 +1090,11 @@ if __name__=="__main__":
     #     num_classes=None,
     #     use_checkpoint=True,
     #     use_fp16=False,
-    #     num_heads=-1,
+    #     num_heads=4,
     #     num_head_channels=64,
     #     num_heads_upsample=-1,
     #     use_scale_shift_norm=False,
-    #     resblock_updown=False,
+    #     resblock_updown=True,
     #     use_new_attention_order=True,
     #     condition_mode=None,
     # )
@@ -911,7 +1102,7 @@ if __name__=="__main__":
     model = NAFNetModel(
         image_size=256,
         in_channels=13,
-        model_channels=64,
+        model_channels=32,
         out_channels=13,
         num_naf_blocks=2,
         dropout=0.1,
@@ -924,10 +1115,13 @@ if __name__=="__main__":
         use_fp16=False,
         use_scale_shift_norm=False,
         condition_mode=None,
-        
+        use_new_attention_order=True,
+        num_heads=4,
+        num_head_channels=32,   
     )
     x = torch.randn(1, 13, 256, 256)
     t = torch.tensor([0])
+    y = torch.randn(1, 2, 256, 256)
 
-    summary(model, input_data={'x':x, 'timesteps':t}, depth=4)
+    summary(model, input_data={'x':x, 'timesteps':t, 'y':y}, depth=4)
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
