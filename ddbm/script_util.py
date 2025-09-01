@@ -180,6 +180,7 @@ def create_model(
         attention_ds.append(image_size // int(res))
 
     if unet_type == "adm":
+        print('num channels', num_channels)
         return UNetModel(
             image_size=image_size,
             in_channels=in_channels,
@@ -202,6 +203,7 @@ def create_model(
         )
 
     elif unet_type == "naf":
+        print('num channels', num_channels)
         return NAFNetModel(
             image_size=image_size,
             in_channels=in_channels,

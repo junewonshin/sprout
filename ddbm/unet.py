@@ -1045,8 +1045,7 @@ class NAFNetModel(nn.Module):
             
             # cross-attention
             if i > 0:
-
-                h = self.attn_blocks[i](h, s)
+                h = self.attn_blocks[i-1](h, s)
             hs.append(h)
 
             # downsampling
