@@ -936,7 +936,7 @@ class NAFNetModel(nn.Module):
         self.output_blocks = nn.ModuleList([])
 
         # Encoder 
-        for num in enc_blk_nums:
+        for idx, num in enumerate(enc_blk_nums):
             for _ in range(num_naf_blocks*num):
                 self.input_blocks.append(TimestepEmbedSequential(
                     NAFBlock(
@@ -957,15 +957,16 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 ))
-            self.attn_blocks.append(
-                CrossAttentionBlock(
-                    ch, 
-                    use_checkpoint=use_checkpoint,
-                    num_heads=num_heads,
-                    num_head_channels=num_head_channels,
-                    use_new_attention_order=use_new_attention_order,
+            if idx > 0:
+                self.attn_blocks.append(
+                    CrossAttentionBlock(
+                        ch, 
+                        use_checkpoint=use_checkpoint,
+                        num_heads=num_heads,
+                        num_head_channels=num_head_channels,
+                        use_new_attention_order=use_new_attention_order,
+                    )
                 )
-            )
             # downsampling
             self.input_blocks.append(TimestepEmbedSequential(
                 conv_nd(dims, ch, ch * 2, 2, 2)
@@ -1043,7 +1044,9 @@ class NAFNetModel(nn.Module):
                 enc += 1
             
             # cross-attention
-            h = self.attn_blocks[i](h, s)
+            if i > 0:
+
+                h = self.attn_blocks[i](h, s)
             hs.append(h)
 
             # downsampling
