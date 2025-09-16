@@ -1102,14 +1102,15 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 ))
-                self.input_cond_blocks.append(
-                    SARBlock(
+                self.input_cond_blocks.append(TimestepEmbedSequential(
+                    NAFBlock(
                         ch,
+                        time_embed_dim,
                         drop_out_rate=dropout,
                         use_scale_shift_norm=use_scale_shift_norm,
                         use_checkpoint=use_checkpoint,
                     )
-                )
+                ))
             self.attn_blocks.append(
                 DBCRCrossAttentionBlock(
                     ch, 
@@ -1192,7 +1193,7 @@ class NAFNetModel(nn.Module):
         for i, num in enumerate(self.enc_blk_nums):
             for _ in range(num*self.num_naf_blocks):
                 h = self.input_blocks[enc](h, emb)
-                s = self.input_cond_blocks[enc](s)
+                s = self.input_cond_blocks[enc](s, emb)
                 enc += 1
             
             # cross-attention
@@ -1253,13 +1254,13 @@ if __name__=="__main__":
 
     model = NAFNetModel(
         image_size=256,
-        in_channels=4,
-        model_channels=16,
-        out_channels=4,
-        num_naf_blocks=2,
+        in_channels=13,
+        model_channels=22,
+        out_channels=13,
+        num_naf_blocks=1,
         dropout=0,
-        middle_blk_num=6,
-        enc_blk_nums=[1,1,2,4],
+        middle_blk_num=1,
+        enc_blk_nums=[1,1,1,28],
         dec_blk_nums=[1,1,1,1],
         dims=2,
         num_classes=None,

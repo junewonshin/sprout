@@ -5,7 +5,7 @@ TRAIN_MODE=ddbm
 
 source scripts/args.sh $DATASET_NAME
 
-FREQ_SAVE_ITER=3054
+FREQ_SAVE_ITER=30555
 EXP=${DATASET_NAME}-${TRAIN_MODE}
 
 # CKPT=assets/ckpts/256x256_diffusion_fixedsigma.pt

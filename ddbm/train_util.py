@@ -15,9 +15,8 @@ from .nn import update_ema
 
 from ddbm.random_util import get_generator
 from ddbm.karras_diffusion import karras_sample
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from torchmetrics import PeakSignalNoiseRatio, MeanSquaredError
-from torchmetrics.functional import structural_similarity_index_measure
+from torchmetrics import PeakSignalNoiseRatio
+
 
 import glob
 
@@ -47,7 +46,7 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        total_training_steps=152700,
+        total_training_steps=1527750,
         augment_pipe=None,
         train_mode="ddbm",
         resume_train_flag=False,
