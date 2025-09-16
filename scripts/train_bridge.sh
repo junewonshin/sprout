@@ -22,7 +22,7 @@ export CUDA_VISIBLE_DEVICES=0,1
 run_args="--nproc_per_node 2 \
           --master_port 29501"
 
-MICRO_BS=1
+MICRO_BS=4
 
 
 torchrun $run_args train.py --exp=$EXP \

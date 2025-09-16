@@ -23,21 +23,21 @@ def rescale(img, oldMin, oldMax):
     img      = (img - oldMin) / oldRange
     return img
 
-
+#TODO: SPROUT=1,2,3,7 | ELSE=ALL
 def process_MS(img):
     intensity_min, intensity_max = 0, 10000         
     img = np.clip(img, intensity_min, intensity_max)
     img = rescale(img, intensity_min, intensity_max)
+    img = np.nan_to_num(img)
     img = img * 2 - 1
-    img = np.nan_to_num(img, nan=-1.0)
-    return img
+    return img[[1, 2, 3, 7], :, :]
 
 def process_SAR(img):
     dB_min, dB_max = -25, 0
     img = np.clip(img, dB_min, dB_max)
     img = rescale(img, dB_min, dB_max)
+    img = np.nan_to_num(img)
     img = img * 2 - 1
-    img = np.nan_to_num(img, nan=-1.0)
     return img
 
 

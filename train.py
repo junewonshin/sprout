@@ -126,10 +126,10 @@ def create_argparser():
         data_dir="",
         dataset="edges2handbags",
         schedule_sampler="real-uniform",
-        lr=1e-4,
+        lr=5e-5,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        global_batch_size=2,
+        global_batch_size=8,
         batch_size=-1,
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values

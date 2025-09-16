@@ -80,16 +80,17 @@ def main():
     args.num_samples = len(dataloader.dataset)
     num = 0
     #TODO: _getItem_ RETURN S2, S2_CLOUDY, (S1, PDX) -> NEED TO MATCH 
-    #TODO: data = [S2, S2_CLOUDY, (S1, PDX)]
+    # data = [S2, S2_CLOUDY, (S1, PDX)]
     for i, data in enumerate(dataloader):
-
-        x0_image = data[0]
+        x0_image, y0_image, _ = data
+        
         x0 = x0_image.to(dist_util.dev())
+        y0 = y0_image.to(dist_util.dev())
 
-        y0_image = data[1].to(dist_util.dev())
-        y0 = y0_image
+        sar_image, pdx = _
+        sar = sar_image.to(dist_util.dev())
 
-        model_kwargs = {"xT": y0}
+        model_kwargs = {"xT": y0, "y":sar}
 
         if "inpaint" in args.dataset:
             _, mask, label = data[2]
@@ -99,8 +100,8 @@ def main():
         else:
             mask = None
 
-        indexes = data[2][1].numpy()
-        sample, path, nfe, pred_x0, sigmas, _ = karras_sample(
+        indexes = pdx.numpy()
+        cloudless, path, nfe, pred_x0, sigmas, _ = karras_sample(
             diffusion,
             model,
             y0,
@@ -117,7 +118,11 @@ def main():
             seed=indexes + args.seed,
         )
 
-        sample = ((sample + 1) * 127.5).clamp(0, 255).to(torch.uint8)
+        # cloudless = cloudless[:, [1,2,3,7], :,:]
+        # x0_image  = x0_image[:, [1,2,3,7], :,:]
+        # y0_image  = y0_image[:, [1,2,3,7], :,:]
+
+        sample = ((cloudless + 1) * 127.5).clamp(0, 255).to(torch.uint8)
         sample = sample.permute(0, 2, 3, 1)
         sample = sample.contiguous()
 
@@ -133,20 +138,23 @@ def main():
         num_display = min(32, sample.shape[0])
         if i == 0 and dist.get_rank() == 0:
             vutils.save_image(
-                sample.permute(0, 3, 1, 2)[:num_display].float() / 255,
+                cloudless[:num_display, [2, 1, 0], :, :] / 2 + 0.5,
                 f"{sample_dir}/sample_{i}.png",
                 nrow=int(np.sqrt(num_display)),
+                # normalize=True,
             )
             if x0 is not None:
                 vutils.save_image(
-                    x0_image[:num_display] / 2 + 0.5,
+                    x0_image[:num_display, [2, 1, 0], :, :] / 2 + 0.5,
                     f"{sample_dir}/x_{i}.png",
                     nrow=int(np.sqrt(num_display)),
+                    # normalize=True,
                 )
             vutils.save_image(
-                y0_image[:num_display] / 2 + 0.5,
+                y0_image[:num_display, [2, 1, 0], :, :] / 2 + 0.5,
                 f"{sample_dir}/y_{i}.png",
                 nrow=int(np.sqrt(num_display)),
+                # normalize=True,
             )
 
         all_images.append(gathered_samples.detach().cpu().numpy())

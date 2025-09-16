@@ -159,7 +159,6 @@ class TrainLoop:
     def run_loop(self):
         while True:
             for batch, cond, _ in self.data:
-
                 if "inpaint" in self.workdir:
                     _, mask, label = _
                 else:

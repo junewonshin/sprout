@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nn import (
+from .nn import (
     checkpoint,
     conv_nd,
     linear,
@@ -296,7 +296,6 @@ class AttentionBlock(nn.Module):
 
 # ADD: Cross Attention Block 
 class CrossAttentionBlock(nn.Module):
-
     def __init__(
         self,
         channels,
@@ -314,6 +313,7 @@ class CrossAttentionBlock(nn.Module):
             self.num_heads = channels // num_head_channels
         self.use_checkpoint = use_checkpoint
 
+        # Present: GroupNorm
         self.q_norm = torch.nn.GroupNorm(32 if channels >= 32 else 1, channels, affine=True)
         self.kv_norm = torch.nn.GroupNorm(32 if channels >= 32 else 1, channels, affine=True)
 
@@ -324,7 +324,7 @@ class CrossAttentionBlock(nn.Module):
         if use_new_attention_order:
             self.attention = QKVCrossAttention(self.num_heads)
         else:
-            self.attention = CWCrossAttnetion(self.num_heads)
+            self.attention = CWCrossAttention(self.num_heads)
 
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
@@ -367,9 +367,83 @@ def count_flops_attn(model, _x, y):
     model.total_ops += torch.DoubleTensor([matmul_ops])
 
 
+class DBCRCrossAttentionBlock(nn.Module):
+    def __init__(
+        self,
+        channels,
+        num_heads=1,
+        num_head_channels=-1,
+        use_checkpoint=False,
+    ):
+        super().__init__()
+        self.channels = channels
+        if num_head_channels == -1:
+            self.num_heads = num_heads
+        else:
+            assert channels % num_head_channels == 0, f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            self.num_heads = channels // num_head_channels
+        self.use_checkpoint = use_checkpoint
+    
+        # Layer Norm
+        self.q_norm = LayerNorm2d(channels)
+        self.kv_norm = LayerNorm2d(channels)
+        
+        # 1x1 Conv Layer
+        self.q_proj = conv_nd(2, channels, channels, 1)
+        self.k_proj = conv_nd(2, channels, channels, 1)
+        self.v_proj = conv_nd(2, channels, channels, 1)
 
-# ADD: Channel Level Cross Attention (DB-CR)
-class CWCrossAttnetion(nn.Module):
+        # mlp
+        self.mlp = nn.Sequential(
+            conv_nd(2, channels, channels*2, 1),
+            nn.GELU(),
+            conv_nd(2, channels*2, channels, 1), 
+        )
+        # final proj
+        self.final = conv_nd(2, channels, channels, 1)
+
+    def forward(self, x, cond):
+        return checkpoint(self._forward, (x, cond), self.parameters(), self.use_checkpoint)
+    
+    def _forward(self, x, cond):
+        assert x.shape == cond.shape, 'the shape of x does not equal to cond'
+        B, C, H, W = x.shape
+
+        HW = H*W
+        HD = self.num_heads
+        CH = C // self.num_heads
+
+        # B, HD, CH, H, W
+        # normalization & proj
+        q = self.q_proj(self.q_norm(x))
+        k = self.k_proj(self.kv_norm(cond))
+        v = self.v_proj(self.kv_norm(cond))
+
+        # heads: (B, C, H, W) -> (B, HD, CH, HW)
+        # Single Head 
+        q_head = q.view(B, HD, CH, HW)
+        k_head = k.view(B, HD, CH, HW)
+        v_head = v.view(B, HD, CH, HW).permute(0, 1, 3, 2)
+
+        # q_head: (B, HD, CH, HW), k_head^t: (B, HD, HW, CH)
+        # attn: (B, HD, CH, CH)
+        attn = torch.matmul(q_head, k_head.transpose(-2, -1))
+        attn = attn * (CH ** -0.5)
+        attn = attn.softmax(dim=-1)
+
+        # attn: (B, HD, CH, CH), v_head: (B, HD, HW, CH)
+        # z: (B, HD, HW, CH)
+        # Check -> AI 
+        z = torch.matmul(v_head, attn)
+        z = z.permute(0, 1, 3, 2).reshape(B, C, H, W)
+
+        z_sum = x + self.final(z)
+        out = z_sum + self.mlp(z_sum)
+        return out
+
+    
+# ADD: Cross Attention
+class CWCrossAttention(nn.Module):
     def __init__(self, n_heads):
         super().__init__()
         self.n_heads = n_heads
@@ -1015,6 +1089,7 @@ class NAFNetModel(nn.Module):
 
         self.input_blocks = nn.ModuleList([TimestepEmbedSequential(
             conv_nd(dims, in_channels, ch, 3, padding=1))])
+        
 
         self.input_cond_blocks = nn.ModuleList([conv_nd(dims, 2, ch, 3, padding=1)])
         
@@ -1022,7 +1097,7 @@ class NAFNetModel(nn.Module):
         self.middle_blocks = nn.ModuleList([])
         self.output_blocks = nn.ModuleList([])
 
-        # Encoder e.g., num = 1, num_naf_blocks = [1, 1, 1, 28]
+        # Encoder 
         for idx, num in enumerate(enc_blk_nums):
             for _ in range(num_naf_blocks*num):
                 self.input_blocks.append(TimestepEmbedSequential(
@@ -1042,16 +1117,14 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 )
-            if idx > 0:
-                self.attn_blocks.append(
-                    CrossAttentionBlock(
-                        ch, 
-                        use_checkpoint=use_checkpoint,
-                        num_heads=num_heads,
-                        num_head_channels=num_head_channels,
-                        use_new_attention_order=use_new_attention_order,
-                    )
+            self.attn_blocks.append(
+                DBCRCrossAttentionBlock(
+                    ch, 
+                    use_checkpoint=use_checkpoint,
+                    num_heads=num_heads,
+                    num_head_channels=num_head_channels,
                 )
+            )
             # downsampling
             self.input_blocks.append(TimestepEmbedSequential(
                 conv_nd(dims, ch, ch * 2, 2, 2)
@@ -1106,7 +1179,7 @@ class NAFNetModel(nn.Module):
         #     self.num_classes is not None
         # ), "must specify y if and only if the model is class-conditional"
 
-        hs = []
+        # hs = []
         timesteps = timesteps.to(self.dtype)
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
@@ -1130,9 +1203,7 @@ class NAFNetModel(nn.Module):
                 enc += 1
             
             # cross-attention
-            if i > 0:
-                h = self.attn_blocks[i-1](h, s)
-            hs.append(h)
+            h = self.attn_blocks[i](h, s)
 
             # downsampling
             h = self.input_blocks[enc](h, emb)
@@ -1146,7 +1217,6 @@ class NAFNetModel(nn.Module):
         dec = 0
         for num in self.dec_blk_nums:
             h = self.output_blocks[dec](h, emb)
-            h = h + hs.pop()
             dec += 1
 
             for _ in range(num*self.num_naf_blocks):
@@ -1163,7 +1233,7 @@ if __name__=="__main__":
     
     import torch
     from torchinfo import summary
-    from unet import UNetModel, NAFNetModel
+    from ddbm.unet import UNetModel, NAFNetModel
 
     # model = UNetModel(
     #     image_size=256,

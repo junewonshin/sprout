@@ -48,12 +48,12 @@ def model_and_diffusion_defaults():
         cov_xy=0.0,
         image_size=256,
         # TODO: in_channels
-        in_channels=13,
-        num_channels=32,
+        in_channels=4,
+        num_channels=16,
         num_res_blocks=2,
         num_heads=4,
         num_heads_upsample=-1,
-        num_head_channels=32,
+        num_head_channels=16,
         # TODO: adm: UNet, naf: NAFNet
         unet_type="naf",
         attention_resolutions="32,16,8",
@@ -120,7 +120,6 @@ def create_model_and_diffusion(
         condition_mode=condition_mode,
     )
     if noise_schedule.startswith("vp"):
-        print("VP")
         ns = VPNoiseSchedule(beta_d=beta_d, beta_min=beta_min)
         precond = DDBMPreCond(ns, sigma_data=sigma_data, cov_xy=cov_xy)
     elif noise_schedule == "ve":
@@ -222,11 +221,10 @@ def create_model(
             use_scale_shift_norm=use_scale_shift_norm,
             use_new_attention_order=use_new_attention_order,
             condition_mode=condition_mode,
-
         )
+
     else:
         raise ValueError(f"Unsupported unet type: {unet_type}")
-
 
 def add_dict_to_argparser(parser, default_dict):
     for k, v in default_dict.items():
