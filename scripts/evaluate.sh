@@ -39,6 +39,10 @@ elif [[ $GEN_SAMPLER == "dbim_high_order" ]]; then
     N=$((NFE-1))
     ORDER=$4
     SAMPLER="dbim_order=${ORDER}"
+
+elif [[ $GEN_SAMPLER == "InDI" ]]; then
+    N=$((NFE-1))
+    SAMPLER="InDI"
 fi
 
 # For example:

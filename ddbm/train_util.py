@@ -14,6 +14,10 @@ from . import dist_util, logger
 from .nn import update_ema
 
 from ddbm.random_util import get_generator
+from ddbm.karras_diffusion import karras_sample
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torchmetrics import PeakSignalNoiseRatio, MeanSquaredError
+from torchmetrics.functional import structural_similarity_index_measure
 
 import glob
 
@@ -43,7 +47,7 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        total_training_steps=10000000,
+        total_training_steps=152700,
         augment_pipe=None,
         train_mode="ddbm",
         resume_train_flag=False,
@@ -215,6 +219,10 @@ class TrainLoop:
 
                 if took_step and self.step % self.save_interval_for_preemption == 0:
                     self.save(for_preemption=True)
+                    psnr_val = self.eval_psnr()
+                    logger.logkv("psnr", psnr_val)
+                    logs = logger.dumpkvs()
+
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -244,6 +252,7 @@ class TrainLoop:
         self._anneal_lr()
         self.log_step()
         return True
+        
 
     def run_test_step(self, batch, cond):
         with torch.no_grad():
@@ -346,6 +355,50 @@ class TrainLoop:
         # loads model at step N, but opt/ema state isn't saved for step N.
         save_checkpoint(0, list(self.model.parameters()))
         dist.barrier()
+
+    @torch.no_grad()
+    def eval_psnr(self):
+        self.ddp_model.eval()
+
+        device = dist_util.dev()
+
+        psnr_metric = PeakSignalNoiseRatio().to(dist_util.dev())
+        psnr_sum = torch.tensor(0.0, device=dist_util.dev())
+        n = torch.tensor(0, device=dist_util.dev())
+
+        for test_batch, test_cond, _ in self.test_data:
+            sar, pdx = _
+
+            sar = sar.to(device, non_blocking=True)
+            if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
+                cond = {"xT": test_cond.to(device, non_blocking=True), "y": sar}
+            else:
+                cond = dict(test_cond)
+                if "xT" not in cond or cond["xT"] is None:
+                    if isinstance(test_cond, torch.Tensor):
+                        cond["xT"] = test_cond.to(device, non_blocking=True)
+                cond["y"] = sar
+
+            pred, *_ = karras_sample(
+                diffusion=self.diffusion,
+                model=self.ddp_model,
+                x_T=test_cond,
+                x_0=None,
+                sampler="InDI",
+                model_kwargs=cond,
+            )
+
+            pred = pred.clamp(-1, 1)
+            gt   = test_batch.clamp(-1, 1)
+
+            psnr_val = psnr_metric(pred, gt)
+            psnr_sum += psnr_val.detach()
+            n += 1
+        
+        psnr_avg = (psnr_sum / n.clamp(min=1)).item()
+
+        self.ddp_model.train()
+        return psnr_avg
 
 
 def parse_resume_step_from_filename(filename):

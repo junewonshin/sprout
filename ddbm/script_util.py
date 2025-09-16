@@ -48,13 +48,12 @@ def model_and_diffusion_defaults():
         cov_xy=0.0,
         image_size=256,
         # TODO: in_channels
-        in_channels=4,
-        num_channels=16,
-        num_res_blocks=2,
-        num_heads=4,
+        in_channels=13,
+        num_channels=22,
+        num_res_blocks=1,
+        num_heads=1,
         num_heads_upsample=-1,
-        num_head_channels=16,
-        # TODO: adm: UNet, naf: NAFNet
+        num_head_channels=1,
         unet_type="naf",
         attention_resolutions="32,16,8",
         channel_mult="",
@@ -66,7 +65,7 @@ def model_and_diffusion_defaults():
         use_fp16=True,
         use_new_attention_order=False,
         condition_mode=None,
-        noise_schedule="ve",
+        noise_schedule="vp",
     )
     return res
 
@@ -199,10 +198,15 @@ def create_model(
             resblock_updown=resblock_updown,
             use_new_attention_order=use_new_attention_order,
             condition_mode=condition_mode,
+            
         )
 
     elif unet_type == "naf":
         print('num channels', num_channels)
+        print('num naf blocks', num_res_blocks)
+        print('in_channels', in_channels)
+        print('model_channels', num_channels)
+
         return NAFNetModel(
             image_size=image_size,
             in_channels=in_channels,
@@ -210,8 +214,8 @@ def create_model(
             out_channels=in_channels,
             num_naf_blocks=num_res_blocks,
             dropout=dropout,
-            middle_blk_num=6,
-            enc_blk_nums=[1, 1, 2, 4],
+            middle_blk_num=1,
+            enc_blk_nums=[1, 1, 1, 28],
             dec_blk_nums=[1, 1, 1, 1],
             num_heads=num_heads,
             num_head_channels=num_head_channels,

@@ -41,7 +41,7 @@ source scripts/args.sh $DATASET_NAME
 NFE=${2:-1}
 
 # Sampler
-GEN_SAMPLER=${3:-"heun"}
+GEN_SAMPLER=${3:-"InDI"}
 
 
 

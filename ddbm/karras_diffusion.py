@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 import torch.distributed as dist
 
 
-from .nn import mean_flat, append_dims, append_zero
+from .nn import mean_flat, append_dims, append_zero, l1_loss
 from .random_util import BatchedSeedGenerator
 
 
@@ -202,35 +202,37 @@ class KarrasDenoiser:
         a_t, b_t, c_t = [append_dims(item, x0.ndim) for item in self.noise_schedule.get_abc(t)]
         samples = a_t * xT + b_t * x0 + c_t * noise
         return samples
-
+    
     def denoise(self, model, x_t, t, **model_kwargs):
         c_skip, c_in, c_out, c_noise, weightings = self.precond.get_scalings_and_weightings(t, x_t.ndim)
         model_output = model(c_in * x_t, c_noise, **model_kwargs)
         denoised = c_out * model_output + c_skip * x_t
         return model_output, denoised, weightings
+    
+    def InDI_sample(self, x0, xT, t):
+        # x0: cloudless, xT: cloudy
+        fct = t[:, None, None, None]
+        samples = (1 - fct) * x0 + fct * xT
+        return samples
+    
+    def InDI_denoise(self, model, x_t, t, **model_kwargs):
+        model_output = model(x_t, t, **model_kwargs)
+        return model_output
 
     def training_bridge_losses(self, model, x_start, t, model_kwargs=None, noise=None):
         assert model_kwargs is not None
         xT = model_kwargs["xT"]
-        mask = model_kwargs.pop("mask", None)
+
         if noise is None:
             noise = torch.randn_like(x_start)
         t = torch.minimum(t, torch.ones_like(t) * self.t_max)
         terms = {}
 
-        x_t = self.bridge_sample(x_start, xT, t, noise)
+        x_t = self.InDI_sample(x_start, xT, t)
 
-        _, denoised, weights = self.denoise(model, x_t, t, **model_kwargs)
-
-        if mask is not None:
-            terms["xs_mse"] = mean_flat(mask * (denoised - x_start) ** 2)
-            terms["mse"] = mean_flat(weights * mask * (denoised - x_start) ** 2)
-        else:
-            terms["xs_mse"] = mean_flat((denoised - x_start) ** 2)
-            terms["mse"] = mean_flat(weights * (denoised - x_start) ** 2)
-
-        terms["loss"] = terms["mse"]
-
+        model_output = self.InDI_denoise(model, x_t, t, **model_kwargs)
+        terms["l1"] = l1_loss(x_start, model_output)
+        terms["loss"] = terms["l1"]
         return terms
 
 
@@ -252,6 +254,7 @@ def karras_sample(
     seed=None,
 ):
     assert sampler in [
+        "InDI",
         "heun",
         "ground_truth",
         "dbim",
@@ -264,6 +267,7 @@ def karras_sample(
         ts = get_sigmas_uniform(steps, diffusion.t_min, diffusion.t_max - 1e-3, device=device)
 
     sample_fn = {
+        "InDI": sample_InDI,
         "heun": sample_heun,
         "ground_truth": sample_ground_truth,
         "dbim": sample_dbim,
@@ -277,14 +281,26 @@ def karras_sample(
         if clip_denoised:
             denoised = denoised.clamp(-1, 1)
         return denoised
+    
+    def InDI_denoiser(x_t, t):
+        model_output = diffusion.InDI_denoise(model, x_t, t, **model_kwargs)
+        return model_output
+    
+    if sampler == "InDI":
+        x_0, path, nfe, pred_x0, sigmas, noise = sample_fn(
+            InDI_denoiser,
+            x_T,
+            ts,
+        )
+    else:
+        x_0, path, nfe, pred_x0, sigmas, noise = sample_fn(
+            denoiser,
+            diffusion,
+            x_T,
+            ts,
+            **sampler_args,
+        )
 
-    x_0, path, nfe, pred_x0, sigmas, noise = sample_fn(
-        denoiser,
-        diffusion,
-        x_T,
-        ts,
-        **sampler_args,
-    )
     if dist.get_rank() == 0:
         print("nfe:", nfe)
 
@@ -649,3 +665,29 @@ def sample_heun(
         pred_x0.append(_pred_x0.detach().cpu())
 
     return x, path, nfe, pred_x0, ts, None
+
+
+@torch.no_grad()
+def sample_InDI(
+    denoiser,
+    x,
+    ts,
+):
+    path = []
+    pred_x0 = []
+
+    ts = ts[:-1]
+    nfe = len(ts) - 1
+
+    for t in tqdm(ts):
+        if x.shape[0] > 1:
+            t = t.expand(x.shape[0]).view(-1, 1, 1, 1)
+        else:
+            t = t
+
+        model_output = denoiser(x, t)
+        fct = 1/(nfe*t)
+        x = (1-fct) * x + fct * model_output
+
+    return x, path, nfe, pred_x0, ts, None
+

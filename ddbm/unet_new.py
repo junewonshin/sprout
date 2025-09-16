@@ -399,45 +399,38 @@ class DBCRCrossAttentionBlock(nn.Module):
             nn.GELU(),
             conv_nd(2, channels*2, channels, 1), 
         )
-        # final proj
-        self.final = conv_nd(2, channels, channels, 1)
 
     def forward(self, x, cond):
         return checkpoint(self._forward, (x, cond), self.parameters(), self.use_checkpoint)
-    
+
     def _forward(self, x, cond):
         assert x.shape == cond.shape, 'the shape of x does not equal to cond'
         B, C, H, W = x.shape
-
         HW = H*W
-        HD = self.num_heads
-        CH = C // self.num_heads
 
-        # B, HD, CH, H, W
         # normalization & proj
         q = self.q_proj(self.q_norm(x))
         k = self.k_proj(self.kv_norm(cond))
         v = self.v_proj(self.kv_norm(cond))
 
-        # heads: (B, C, H, W) -> (B, HD, CH, HW)
+        # heads: (B, C, HW)
         # Single Head 
-        q_head = q.view(B, HD, CH, HW)
-        k_head = k.view(B, HD, CH, HW)
-        v_head = v.view(B, HD, CH, HW).permute(0, 1, 3, 2)
+        q_head = q.view(B, C, HW)
+        k_head = k.view(B, C, HW)
+        v_head = v.view(B, C, HW)
 
-        # q_head: (B, HD, CH, HW), k_head^t: (B, HD, HW, CH)
-        # attn: (B, HD, CH, CH)
+        # q_head: (B, C, HW), k_head^t: (B, HW, C)
+        # attn: (B, C, C)
         attn = torch.matmul(q_head, k_head.transpose(-2, -1))
-        attn = attn * (CH ** -0.5)
+        attn = attn * (HW ** -0.5)
         attn = attn.softmax(dim=-1)
 
-        # attn: (B, HD, CH, CH), v_head: (B, HD, HW, CH)
-        # z: (B, HD, HW, CH)
-        # Check -> AI 
-        z = torch.matmul(v_head, attn)
-        z = z.permute(0, 1, 3, 2).reshape(B, C, H, W)
+        # attn: (B, C, C), v_head: (B, C, HW)
+        # z: (B, C, HW)
+        z = torch.matmul(attn, v_head)
+        z = z.reshape(B, C, H, W)
 
-        z_sum = x + self.final(z)
+        z_sum = x + z
         out = z_sum + self.mlp(z_sum)
         return out
 

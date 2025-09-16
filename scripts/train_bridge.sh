@@ -5,7 +5,7 @@ TRAIN_MODE=ddbm
 
 source scripts/args.sh $DATASET_NAME
 
-FREQ_SAVE_ITER=5000
+FREQ_SAVE_ITER=3054
 EXP=${DATASET_NAME}-${TRAIN_MODE}
 
 # CKPT=assets/ckpts/256x256_diffusion_fixedsigma.pt
@@ -18,8 +18,8 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}
 #           --master_port $MASTER_PORT \
 #           --nnodes $WORLD_SIZE"
 # For local
-export CUDA_VISIBLE_DEVICES=0,1
-run_args="--nproc_per_node 2 \
+export CUDA_VISIBLE_DEVICES=0
+run_args="--nproc_per_node 1 \
           --master_port 29501"
 
 MICRO_BS=4
