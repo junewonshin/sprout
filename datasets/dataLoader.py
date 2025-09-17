@@ -30,7 +30,7 @@ def process_MS(img):
     img = rescale(img, intensity_min, intensity_max)
     img = np.nan_to_num(img)
     img = img * 2 - 1
-    return img[[1, 2, 3, 7], :, :]
+    return img
 
 def process_SAR(img):
     dB_min, dB_max = -25, 0

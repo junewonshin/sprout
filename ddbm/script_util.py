@@ -8,7 +8,7 @@ from .karras_diffusion import (
     DDBMPreCond,
     I2SBPreCond,
 )
-from .unet import UNetModel, NAFNetModel
+from .unet_new import UNetModel, NAFNetModel
 
 # NUM_CLASSES = 1000
 

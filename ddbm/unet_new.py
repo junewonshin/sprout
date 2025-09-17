@@ -404,32 +404,32 @@ class DBCRCrossAttentionBlock(nn.Module):
         return checkpoint(self._forward, (x, cond), self.parameters(), self.use_checkpoint)
 
     def _forward(self, x, cond):
-        assert x.shape == cond.shape, 'the shape of x does not equal to cond'
-        B, C, H, W = x.shape
-        HW = H*W
+        with torch.cuda.amp.autocast(enabled=False):
+            assert x.shape == cond.shape, 'the shape of x does not equal to cond'
+            B, C, H, W = x.shape
+            HW = H*W
 
-        # normalization & proj
-        q = self.q_proj(self.q_norm(x))
-        k = self.k_proj(self.kv_norm(cond))
-        v = self.v_proj(self.kv_norm(cond))
+            # normalization & proj
+            q = self.q_proj(self.q_norm(x))
+            k = self.k_proj(self.kv_norm(cond))
+            v = self.v_proj(self.kv_norm(cond))
 
-        # heads: (B, C, HW)
-        # Single Head 
-        q_head = q.view(B, C, HW)
-        k_head = k.view(B, C, HW)
-        v_head = v.view(B, C, HW)
+            # heads: (B, C, HW)
+            # Single Head 
+            q_head = q.view(B, C, HW).float()
+            k_head = k.view(B, C, HW).float()
+            v_head = v.view(B, C, HW).float()
 
-        # q_head: (B, C, HW), k_head^t: (B, HW, C)
-        # attn: (B, C, C)
-        attn = torch.matmul(q_head, k_head.transpose(-2, -1))
-        attn = attn * (HW ** -0.5)
-        attn = attn.softmax(dim=-1)
+            # q_head: (B, C, HW), k_head^t: (B, HW, C)
+            # attn: (B, C, C)
+            attn = torch.matmul(q_head, k_head.transpose(-2, -1))
+            attn = attn * (HW ** -0.5)
+            attn = attn.softmax(dim=-1)
 
-        # attn: (B, C, C), v_head: (B, C, HW)
-        # z: (B, C, HW)
-        z = torch.matmul(attn, v_head)
-        z = z.reshape(B, C, H, W)
-
+            # attn: (B, C, C), v_head: (B, C, HW)
+            # z: (B, C, HW)
+            z = torch.matmul(attn, v_head)
+        z = z.to(q.dtype).reshape(B, C, H, W)
         z_sum = x + z
         out = z_sum + self.mlp(z_sum)
         return out
@@ -1084,7 +1084,8 @@ class NAFNetModel(nn.Module):
             conv_nd(dims, in_channels, ch, 3, padding=1))])
         
 
-        self.input_cond_blocks = nn.ModuleList([conv_nd(dims, 2, ch, 3, padding=1)])
+        self.input_cond_blocks = nn.ModuleList([TimestepEmbedSequential(
+            conv_nd(dims, 2, ch, 3, padding=1))])
         
         self.attn_blocks = nn.ModuleList([])
         self.middle_blocks = nn.ModuleList([])
@@ -1124,9 +1125,9 @@ class NAFNetModel(nn.Module):
                 conv_nd(dims, ch, ch * 2, 2, 2)
             ))
             if idx != len(enc_blk_nums) - 1:
-                self.input_cond_blocks.append(
+                self.input_cond_blocks.append(TimestepEmbedSequential(
                     conv_nd(dims, ch, ch * 2, 2, 2)
-                )
+                ))
             ch = ch * 2
 
         # Middle
@@ -1165,6 +1166,7 @@ class NAFNetModel(nn.Module):
         )
 
     # y = SAR
+    #TODO:
     def forward(self, x, timesteps, xT=None, y=None):
         if self.condition_mode == "concat":
             x = torch.cat([x, xT], dim=1)
@@ -1187,8 +1189,10 @@ class NAFNetModel(nn.Module):
         s = y.to(self.dtype)
 
         # input embedding
+
         h = self.input_blocks[0](h, emb)
-        s = self.input_cond_blocks[0](s)
+        s = self.input_cond_blocks[0](s, emb)
+
         enc = 1
         for i, num in enumerate(self.enc_blk_nums):
             for _ in range(num*self.num_naf_blocks):
@@ -1202,7 +1206,7 @@ class NAFNetModel(nn.Module):
             # downsampling
             h = self.input_blocks[enc](h, emb)
             if i != len(self.enc_blk_nums) - 1:
-                s = self.input_cond_blocks[enc](s)
+                s = self.input_cond_blocks[enc](s, emb)
             enc += 1
 
         for modules in self.middle_blocks:

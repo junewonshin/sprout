@@ -129,7 +129,7 @@ def create_argparser():
         lr=5e-5,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        global_batch_size=8,
+        global_batch_size=64,
         batch_size=-1,
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values
@@ -145,7 +145,7 @@ def create_argparser():
         num_workers=8,
         use_augment=False,
         pretrained_ckpt=None,
-        train_mode="ddbm",
+        train_mode="dbcr",
         # TODO: unet_type
         unet_type="naf",
     )

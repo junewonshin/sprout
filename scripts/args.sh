@@ -83,7 +83,7 @@ elif [[ $DATASET_NAME == "sen12mscr" ]]; then
 
     EXP="sen12mscr${IMG_SIZE}_${NUM_CH}d"
     SAVE_ITER=152775
-    MICRO_BS=4
+    MICRO_BS=32
     DROPOUT=0
     CLASS_COND=False
     UNET_TYPE="naf"

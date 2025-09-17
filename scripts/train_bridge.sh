@@ -1,7 +1,7 @@
 export PYTHONPATH=$PYTHONPATH:./
 
 DATASET_NAME=sen12mscr
-TRAIN_MODE=ddbm
+TRAIN_MODE=dbcr
 
 source scripts/args.sh $DATASET_NAME
 
@@ -19,10 +19,10 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}
 #           --nnodes $WORLD_SIZE"
 # For local
 export CUDA_VISIBLE_DEVICES=0
-run_args="--nproc_per_node 1 \
-          --master_port 29501"
+run_args="--nproc_per_node 1\
+          --master_port 29521"
 
-MICRO_BS=4
+MICRO_BS=32
 
 
 torchrun $run_args train.py --exp=$EXP \
