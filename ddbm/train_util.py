@@ -355,47 +355,50 @@ class TrainLoop:
         save_checkpoint(0, list(self.model.parameters()))
         dist.barrier()
 
-    @torch.no_grad()
+
     def eval_psnr(self):
         self.ddp_model.eval()
-
+        self.ddp_model.use_checkpoint = False
         device = dist_util.dev()
-
-        psnr_metric = PeakSignalNoiseRatio().to(dist_util.dev())
-        psnr_sum = torch.tensor(0.0, device=dist_util.dev())
-        n = torch.tensor(0, device=dist_util.dev())
-
-        for test_batch, test_cond, _ in self.test_data:
-            sar, pdx = _
-
-            sar = sar.to(device, non_blocking=True)
-            if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
-                cond = {"xT": test_cond.to(device, non_blocking=True), "y": sar}
-            else:
-                cond = dict(test_cond)
-                if "xT" not in cond or cond["xT"] is None:
-                    if isinstance(test_cond, torch.Tensor):
-                        cond["xT"] = test_cond.to(device, non_blocking=True)
-                cond["y"] = sar
-
-            pred, *_ = karras_sample(
-                diffusion=self.diffusion,
-                model=self.ddp_model,
-                x_T=test_cond,
-                x_0=None,
-                sampler="InDI",
-                model_kwargs=cond,
-            )
-
-            pred = pred.clamp(-1, 1)
-            gt   = test_batch.clamp(-1, 1)
-
-            psnr_val = psnr_metric(pred, gt)
-            psnr_sum += psnr_val.detach()
-            n += 1
         
-        psnr_avg = (psnr_sum / n.clamp(min=1)).item()
+        psnr_metric = PeakSignalNoiseRatio(data_range=2.0).to(device)
+        psnr_sum = torch.tensor(0.0, device=device)
+        n = torch.tensor(0, device=device)
+        with torch.inference_mode():
+            with torch.cuda.amp.autocast(enabled=True):
+                for test_batch, test_cond, _ in self.test_data:
+                    sar, pdx = _
+                    gt = test_batch.to(device, non_blocking=True).clamp(-1, 1)
+                    sar = sar.to(device, non_blocking=True)
 
+                    if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
+                        xT = test_cond.to(device, non_blocking=True)
+                        cond = {"xT": xT, "y": sar}
+                    else:
+                        cond = dict(test_cond)
+                        if "xT" not in cond or cond["xT"] is None:
+                            if isinstance(test_cond, torch.Tensor):
+                                cond["xT"] = test_cond.to(device, non_blocking=True)
+                        else:
+                            cond["xT"] = cond["xT"].to(device, non_blocking=True)
+                        cond["y"] = sar
+
+                    pred, *_ = karras_sample(
+                        diffusion=self.diffusion,
+                        model=self.ddp_model,
+                        x_T=xT,
+                        x_0=None,
+                        sampler="InDI",
+                        steps=2,
+                        model_kwargs=cond,
+                    )
+
+                    pred = pred.clamp(-1, 1)
+                    psnr_val = psnr_metric(pred, gt)
+                    psnr_sum += psnr_val
+                    n += 1
+            
+        psnr_avg = (psnr_sum / n.clamp(min=1)).item()
         self.ddp_model.train()
         return psnr_avg
 

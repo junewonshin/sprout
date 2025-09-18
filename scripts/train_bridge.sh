@@ -18,8 +18,8 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}
 #           --master_port $MASTER_PORT \
 #           --nnodes $WORLD_SIZE"
 # For local
-export CUDA_VISIBLE_DEVICES=0
-run_args="--nproc_per_node 1\
+export CUDA_VISIBLE_DEVICES=0,1
+run_args="--nproc_per_node 2 \
           --master_port 29521"
 
 MICRO_BS=32

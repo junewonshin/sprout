@@ -208,13 +208,13 @@ class KarrasDenoiser:
         model_output = model(c_in * x_t, c_noise, **model_kwargs)
         denoised = c_out * model_output + c_skip * x_t
         return model_output, denoised, weightings
-    
+    # TODO:
     def InDI_sample(self, x0, xT, t):
         # x0: cloudless, xT: cloudy
         fct = t[:, None, None, None]
         samples = (1 - fct) * x0 + fct * xT
         return samples
-    
+    # TODO:
     def InDI_denoise(self, model, x_t, t, **model_kwargs):
         model_output = model(x_t, t, **model_kwargs)
         return model_output
@@ -681,12 +681,15 @@ def sample_InDI(
 
     for t in tqdm(ts):
         if x.shape[0] > 1:
-            t = t.expand(x.shape[0]).view(-1, 1, 1, 1)
+            input_t = t.expand(x.shape[0])
+            t = input_t.view(-1, 1, 1, 1)
         else:
             t = t
-
-        model_output = denoiser(x, t)
+        
+        model_output = denoiser(x, input_t)        
         fct = 1/(nfe*t)
+
+        fct = fct.to(x.device)
         x = (1-fct) * x + fct * model_output
 
     return x, path, nfe, pred_x0, ts, None

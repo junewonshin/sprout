@@ -145,7 +145,7 @@ def create_argparser():
         num_workers=8,
         use_augment=False,
         pretrained_ckpt=None,
-        train_mode="dbcr",
+        train_mode="ddbm",
         # TODO: unet_type
         unet_type="naf",
     )
