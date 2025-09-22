@@ -395,10 +395,12 @@ class DBCRCrossAttentionBlock(nn.Module):
 
         # mlp
         self.mlp = nn.Sequential(
-            conv_nd(2, channels, channels*2, 1),
+            linear(channels, channels*2),
             nn.GELU(),
-            conv_nd(2, channels*2, channels, 1), 
+            linear(channels*2, channels), 
         )
+
+        self.out = conv_nd(2, channels, channels, 1)
 
     def forward(self, x, cond):
         return checkpoint(self._forward, (x, cond), self.parameters(), self.use_checkpoint)
@@ -408,31 +410,39 @@ class DBCRCrossAttentionBlock(nn.Module):
             assert x.shape == cond.shape, 'the shape of x does not equal to cond'
             B, C, H, W = x.shape
             HW = H*W
+            HD = self.num_heads
+            CH = C // self.num_heads
 
-            # normalization & proj
+            # normalization & proj : (B, C, H, W)
             q = self.q_proj(self.q_norm(x))
             k = self.k_proj(self.kv_norm(cond))
             v = self.v_proj(self.kv_norm(cond))
 
-            # heads: (B, C, HW)
-            # Single Head 
-            q_head = q.view(B, C, HW).float()
-            k_head = k.view(B, C, HW).float()
-            v_head = v.view(B, C, HW).float()
+            # heads: (B, HD, CH HW)
+            q_head = q.view(B, HD, CH, HW).float()
+            k_head = k.view(B, HD, CH, HW).float()
+            v_head = v.view(B, HD, CH, HW).float()
 
-            # q_head: (B, C, HW), k_head^t: (B, HW, C)
-            # attn: (B, C, C)
+            # q_head: (B, HD, CH, HW), k_head^t: (B, HD, HW CH)
+            # attn: (B, HD, CH, CH)
             attn = torch.matmul(q_head, k_head.transpose(-2, -1))
             attn = attn * (HW ** -0.5)
             attn = attn.softmax(dim=-1)
 
-            # attn: (B, C, C), v_head: (B, C, HW)
-            # z: (B, C, HW)
+            # attn: (B, HD, CH, CH), v_head: (B, HD, CH, HW)
+            # z: (B, HD, CH, HW)
             z = torch.matmul(attn, v_head)
-        z = z.to(q.dtype).reshape(B, C, H, W)
-        z_sum = x + z
-        out = z_sum + self.mlp(z_sum)
-        return out
+        
+        # shape: (B, HW, C)
+        z = z.view(B, C, HW).transpose(1, 2)
+        x_reshape = x.view(B, C, HW).transpose(1, 2)
+        z_sum = x_reshape + z
+        z_out = z_sum + self.mlp(z_sum)
+
+        # shape: B, C, H, W
+        z_out = z_out.transpose(1, 2).contiguous().view(B, C, H, W)
+        final = self.out(z_out)
+        return final
 
     
 # ADD: Cross Attention
@@ -1116,7 +1126,7 @@ class NAFNetModel(nn.Module):
                 DBCRCrossAttentionBlock(
                     ch, 
                     use_checkpoint=use_checkpoint,
-                    num_heads=num_heads,
+                    num_heads=num_heads[idx],
                     num_head_channels=num_head_channels,
                 )
             )
@@ -1166,7 +1176,6 @@ class NAFNetModel(nn.Module):
         )
 
     # y = SAR
-    #TODO:
     def forward(self, x, timesteps, xT=None, y=None):
         if self.condition_mode == "concat":
             x = torch.cat([x, xT], dim=1)
@@ -1187,9 +1196,7 @@ class NAFNetModel(nn.Module):
         # type
         h = x.to(self.dtype)
         s = y.to(self.dtype)
-
         # input embedding
-
         h = self.input_blocks[0](h, emb)
         s = self.input_cond_blocks[0](s, emb)
 
@@ -1199,7 +1206,7 @@ class NAFNetModel(nn.Module):
                 h = self.input_blocks[enc](h, emb)
                 s = self.input_cond_blocks[enc](s, emb)
                 enc += 1
-            
+
             # cross-attention
             h = self.attn_blocks[i](h, s)
 
@@ -1220,7 +1227,6 @@ class NAFNetModel(nn.Module):
             for _ in range(num*self.num_naf_blocks):
                 h = self.output_blocks[dec](h, emb)
                 dec += 1
-        
         h = self.output_blocks[dec](h)
         h = h.to(x.dtype)
         

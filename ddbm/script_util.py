@@ -206,7 +206,6 @@ def create_model(
         print('num naf blocks', num_res_blocks)
         print('in_channels', in_channels)
         print('model_channels', num_channels)
-
         return NAFNetModel(
             image_size=image_size,
             in_channels=in_channels,
@@ -217,7 +216,7 @@ def create_model(
             middle_blk_num=1,
             enc_blk_nums=[1, 1, 1, 28],
             dec_blk_nums=[1, 1, 1, 1],
-            num_heads=num_heads,
+            num_heads=[1, 1, 2, 4],
             num_head_channels=num_head_channels,
             # num_classes=(NUM_CLASSES if class_cond else None),
             use_checkpoint=use_checkpoint,

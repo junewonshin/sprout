@@ -125,11 +125,11 @@ def create_argparser():
     defaults = dict(
         data_dir="",
         dataset="edges2handbags",
-        schedule_sampler="real-uniform",
+        schedule_sampler="InDI-uniform",
         lr=5e-5,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        global_batch_size=64,
+        global_batch_size=32,
         batch_size=-1,
         microbatch=-1,  # -1 disables microbatches
         ema_rate="0.9999",  # comma-separated list of EMA values

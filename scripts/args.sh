@@ -46,7 +46,7 @@ elif [[ $DATASET_NAME == "imagenet_inpaint_center" ]]; then
 
     EXP="imagenet_inpaint_center${IMG_SIZE}_${NUM_CH}d"
     SAVE_ITER=20000
-    MICRO_BS=32
+    MICRO_BS=16
     DROPOUT=0
     CLASS_COND=True
     UNET_TYPE='adm'
@@ -82,7 +82,7 @@ elif [[ $DATASET_NAME == "sen12mscr" ]]; then
     ATTN_TYPE=True
 
     EXP="sen12mscr${IMG_SIZE}_${NUM_CH}d"
-    SAVE_ITER=152775
+    SAVE_ITER=19100
     MICRO_BS=32
     DROPOUT=0
     CLASS_COND=False

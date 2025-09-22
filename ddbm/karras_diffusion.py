@@ -208,6 +208,7 @@ class KarrasDenoiser:
         model_output = model(c_in * x_t, c_noise, **model_kwargs)
         denoised = c_out * model_output + c_skip * x_t
         return model_output, denoised, weightings
+    
     # TODO:
     def InDI_sample(self, x0, xT, t):
         # x0: cloudless, xT: cloudy
@@ -263,6 +264,8 @@ def karras_sample(
 
     if sampler == "heun":
         ts = get_sigmas_karras(steps, diffusion.t_min, diffusion.t_max - 1e-4, rho, device=device)
+    elif sampler == "InDI":
+        ts = get_sigmas_uniform(steps, 0, 1, device=device)
     else:
         ts = get_sigmas_uniform(steps, diffusion.t_min, diffusion.t_max - 1e-3, device=device)
 
@@ -305,10 +308,10 @@ def karras_sample(
         print("nfe:", nfe)
 
     return (
-        x_0.clamp(-1, 1),
-        [x.clamp(-1, 1) for x in path],
+        x_0.clamp(0, 1),
+        [x.clamp(0, 1) for x in path],
         nfe,
-        [x.clamp(-1, 1) for x in pred_x0],
+        [x.clamp(0, 1) for x in pred_x0],
         sigmas,
         noise,
     )

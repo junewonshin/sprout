@@ -5,8 +5,15 @@ TRAIN_MODE=dbcr
 
 source scripts/args.sh $DATASET_NAME
 
-FREQ_SAVE_ITER=30555
-EXP=${DATASET_NAME}-${TRAIN_MODE}
+
+
+# MHA: Multi-head Attention
+# BS : Batch Size (Default: 32)
+# Precond: 
+# 10: [0, 1]
+# 11: [-1, 1]
+FREQ_SAVE_ITER=3820
+EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10
 
 # CKPT=assets/ckpts/256x256_diffusion_fixedsigma.pt
 
@@ -18,8 +25,8 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}
 #           --master_port $MASTER_PORT \
 #           --nnodes $WORLD_SIZE"
 # For local
-export CUDA_VISIBLE_DEVICES=0,1
-run_args="--nproc_per_node 2 \
+export CUDA_VISIBLE_DEVICES=0
+run_args="--nproc_per_node 1 \
           --master_port 29521"
 
 MICRO_BS=32

@@ -46,7 +46,7 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        total_training_steps=1527750,
+        total_training_steps=19100,
         augment_pipe=None,
         train_mode="ddbm",
         resume_train_flag=False,
@@ -219,9 +219,11 @@ class TrainLoop:
                 if took_step and self.step % self.save_interval_for_preemption == 0:
                     self.save(for_preemption=True)
                     psnr_val = self.eval_psnr()
-                    logger.logkv("psnr", psnr_val)
+                    if isinstance(psnr_val, dict):
+                        for k, v in psnr_val.items():
+                            logger.logkv(k, v)
                     logs = logger.dumpkvs()
-
+                
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -361,14 +363,15 @@ class TrainLoop:
         self.ddp_model.use_checkpoint = False
         device = dist_util.dev()
         
-        psnr_metric = PeakSignalNoiseRatio(data_range=2.0).to(device)
-        psnr_sum = torch.tensor(0.0, device=device)
-        n = torch.tensor(0, device=device)
+        psnr_metric    = PeakSignalNoiseRatio().to(device)
+        psnr_sum_NFE1  = torch.tensor(0.0, device=device)
+        psnr_sum_NFE3  = torch.tensor(0.0, device=device)
+        psnr_sum_NFE10 = torch.tensor(0.0, device=device)
+        n_local        = torch.tensor(0, device=device, dtype=torch.long)
         with torch.inference_mode():
-            with torch.cuda.amp.autocast(enabled=True):
                 for test_batch, test_cond, _ in self.test_data:
                     sar, pdx = _
-                    gt = test_batch.to(device, non_blocking=True).clamp(-1, 1)
+                    gt = test_batch.to(device, non_blocking=True).clamp(0, 1)
                     sar = sar.to(device, non_blocking=True)
 
                     if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
@@ -382,25 +385,61 @@ class TrainLoop:
                         else:
                             cond["xT"] = cond["xT"].to(device, non_blocking=True)
                         cond["y"] = sar
+                    with torch.cuda.amp.autocast(enabled=True):
+                        # NFE=1
+                        pred_NFE1, *_ = karras_sample(
+                            diffusion=self.diffusion,
+                            model=self.ddp_model,
+                            x_T=xT,
+                            x_0=None,
+                            sampler="InDI",
+                            steps=2,
+                            model_kwargs=cond,
+                        )
+                        # NFE=3
+                        pred_NFE3, *_ = karras_sample(
+                            diffusion=self.diffusion,
+                            model=self.ddp_model,
+                            x_T=xT,
+                            x_0=None,
+                            sampler="InDI",
+                            steps=4,
+                            model_kwargs=cond,
+                        )
+                        # NFE=10
+                        pred_NFE10, *_ = karras_sample(
+                            diffusion=self.diffusion,
+                            model=self.ddp_model,
+                            x_T=xT,
+                            x_0=None,
+                            sampler="InDI",
+                            steps=11,
+                            model_kwargs=cond,
+                        )
+                    B = gt.shape[0]
 
-                    pred, *_ = karras_sample(
-                        diffusion=self.diffusion,
-                        model=self.ddp_model,
-                        x_T=xT,
-                        x_0=None,
-                        sampler="InDI",
-                        steps=2,
-                        model_kwargs=cond,
-                    )
+                    # pre
+                    pred_NFE1  = pred_NFE1.clamp(0, 1).float()
+                    pred_NFE3  = pred_NFE3.clamp(0, 1).float()
+                    pred_NFE10 = pred_NFE10.clamp(0, 1).float()
+                    gt_f         = gt.float()
 
-                    pred = pred.clamp(-1, 1)
-                    psnr_val = psnr_metric(pred, gt)
-                    psnr_sum += psnr_val
-                    n += 1
-            
-        psnr_avg = (psnr_sum / n.clamp(min=1)).item()
+                    # psnr
+                    psnr_sum_NFE1 += psnr_metric(pred_NFE1, gt_f) * B
+                    psnr_sum_NFE3 += psnr_metric(pred_NFE3, gt_f) * B
+                    psnr_sum_NFE10 += psnr_metric(pred_NFE10, gt_f) * B
+                    n_local += B
+        n = n_local.clamp(min=1).float()
+        psnr_avg_NFE1  = (psnr_sum_NFE1 / n).item()
+        psnr_avg_NFE3  = (psnr_sum_NFE3 / n).item()
+        psnr_avg_NFE10 = (psnr_sum_NFE10 / n).item()
+
+        psnr = {"psnr_NFE1": psnr_avg_NFE1, 
+                "psnr_NFE3": psnr_avg_NFE3,
+                "psnr_NFE10": psnr_avg_NFE10,}
+
         self.ddp_model.train()
-        return psnr_avg
+        return psnr
 
 
 def parse_resume_step_from_filename(filename):
