@@ -1094,8 +1094,8 @@ class NAFNetModel(nn.Module):
             conv_nd(dims, in_channels, ch, 3, padding=1))])
         
 
-        self.input_cond_blocks = nn.ModuleList([TimestepEmbedSequential(
-            conv_nd(dims, 2, ch, 3, padding=1))])
+        self.input_cond_blocks = nn.ModuleList([
+            conv_nd(dims, 2, ch, 3, padding=1)])
         
         self.attn_blocks = nn.ModuleList([])
         self.middle_blocks = nn.ModuleList([])
@@ -1113,15 +1113,14 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 ))
-                self.input_cond_blocks.append(TimestepEmbedSequential(
-                    NAFBlock(
+                self.input_cond_blocks.append(
+                    SARBlock(
                         ch,
-                        time_embed_dim,
                         drop_out_rate=dropout,
                         use_scale_shift_norm=use_scale_shift_norm,
                         use_checkpoint=use_checkpoint,
                     )
-                ))
+                )
             self.attn_blocks.append(
                 DBCRCrossAttentionBlock(
                     ch, 
@@ -1135,9 +1134,9 @@ class NAFNetModel(nn.Module):
                 conv_nd(dims, ch, ch * 2, 2, 2)
             ))
             if idx != len(enc_blk_nums) - 1:
-                self.input_cond_blocks.append(TimestepEmbedSequential(
+                self.input_cond_blocks.append(
                     conv_nd(dims, ch, ch * 2, 2, 2)
-                ))
+                )
             ch = ch * 2
 
         # Middle
@@ -1198,13 +1197,13 @@ class NAFNetModel(nn.Module):
         s = y.to(self.dtype)
         # input embedding
         h = self.input_blocks[0](h, emb)
-        s = self.input_cond_blocks[0](s, emb)
+        s = self.input_cond_blocks[0](s)
 
         enc = 1
         for i, num in enumerate(self.enc_blk_nums):
             for _ in range(num*self.num_naf_blocks):
                 h = self.input_blocks[enc](h, emb)
-                s = self.input_cond_blocks[enc](s, emb)
+                s = self.input_cond_blocks[enc](s)
                 enc += 1
 
             # cross-attention
@@ -1213,7 +1212,7 @@ class NAFNetModel(nn.Module):
             # downsampling
             h = self.input_blocks[enc](h, emb)
             if i != len(self.enc_blk_nums) - 1:
-                s = self.input_cond_blocks[enc](s, emb)
+                s = self.input_cond_blocks[enc](s)
             enc += 1
 
         for modules in self.middle_blocks:

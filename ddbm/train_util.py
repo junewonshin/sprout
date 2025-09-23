@@ -223,7 +223,14 @@ class TrainLoop:
                         for k, v in psnr_val.items():
                             logger.logkv(k, v)
                     logs = logger.dumpkvs()
-                
+
+                # Debug
+                if self.step == 57301:
+                    psnr_val = self.eval_psnr()
+                    if isinstance(psnr_val, dict):
+                        for k, v in psnr_val.items():
+                            logger.logkv(k, v)
+                    logs = logger.dumpkvs()
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -393,7 +400,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=2,
+                            steps=0,
                             model_kwargs=cond,
                         )
                         # NFE=3
@@ -403,7 +410,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=4,
+                            steps=2,
                             model_kwargs=cond,
                         )
                         # NFE=10
@@ -413,7 +420,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=11,
+                            steps=9,
                             model_kwargs=cond,
                         )
                     B = gt.shape[0]
@@ -422,7 +429,7 @@ class TrainLoop:
                     pred_NFE1  = pred_NFE1.clamp(0, 1).float()
                     pred_NFE3  = pred_NFE3.clamp(0, 1).float()
                     pred_NFE10 = pred_NFE10.clamp(0, 1).float()
-                    gt_f         = gt.float()
+                    gt_f       = gt.float()
 
                     # psnr
                     psnr_sum_NFE1 += psnr_metric(pred_NFE1, gt_f) * B

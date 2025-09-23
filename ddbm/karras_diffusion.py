@@ -676,24 +676,24 @@ def sample_InDI(
     x,
     ts,
 ):
-    path = []
-    pred_x0 = []
-
+    device = x.device
+    B = x.shape[0]
+    ts = ts.to(device)
     ts = ts[:-1]
-    nfe = len(ts) - 1
 
+    nfe = len(ts)
     for t in tqdm(ts):
         if x.shape[0] > 1:
-            input_t = t.expand(x.shape[0])
-            t = input_t.view(-1, 1, 1, 1)
-        else:
-            t = t
-        
-        model_output = denoiser(x, input_t)        
-        fct = 1/(nfe*t)
+            input_t = t.expand(B)
+            t = input_t.view(B, 1, 1, 1)
 
-        fct = fct.to(x.device)
-        x = (1-fct) * x + fct * model_output
+        pred_x0 = denoiser(x, input_t)        
+        fct = (1.0 / (nfe * t)).clamp(0.0, 1.0)
+        x = (1-fct) * x + fct * pred_x0
 
-    return x, path, nfe, pred_x0, ts, None
+    t0 = torch.zeros(B, device=device)
+    x = denoiser(x, t0)
+    nfe += 1
+
+    return x, [], nfe, [], ts, None
 

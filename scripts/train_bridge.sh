@@ -7,13 +7,15 @@ source scripts/args.sh $DATASET_NAME
 
 
 
-# MHA: Multi-head Attention
+# MHA: Multi-head Attention (Default: None)
 # BS : Batch Size (Default: 32)
 # Precond: 
 # 10: [0, 1]
 # 11: [-1, 1]
+# SAR - time_embed None: SN
+
 FREQ_SAVE_ITER=3820
-EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10
+EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10-SN
 
 # CKPT=assets/ckpts/256x256_diffusion_fixedsigma.pt
 
@@ -25,9 +27,9 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10
 #           --master_port $MASTER_PORT \
 #           --nnodes $WORLD_SIZE"
 # For local
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 run_args="--nproc_per_node 1 \
-          --master_port 29521"
+          --master_port 29501"
 
 MICRO_BS=32
 
