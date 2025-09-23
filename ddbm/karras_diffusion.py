@@ -687,13 +687,10 @@ def sample_InDI(
             input_t = t.expand(B)
             t = input_t.view(B, 1, 1, 1)
 
-        pred_x0 = denoiser(x, input_t)        
+        pred_x0 = denoiser(x, input_t)      
+        # Sampling - clamping  
         fct = (1.0 / (nfe * t)).clamp(0.0, 1.0)
         x = (1-fct) * x + fct * pred_x0
-
-    t0 = torch.zeros(B, device=device)
-    x = denoiser(x, t0)
-    nfe += 1
 
     return x, [], nfe, [], ts, None
 

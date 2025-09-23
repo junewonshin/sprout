@@ -225,7 +225,7 @@ class TrainLoop:
                     logs = logger.dumpkvs()
 
                 # Debug
-                if self.step == 57301:
+                if self.step == 80221:
                     psnr_val = self.eval_psnr()
                     if isinstance(psnr_val, dict):
                         for k, v in psnr_val.items():
@@ -364,13 +364,13 @@ class TrainLoop:
         save_checkpoint(0, list(self.model.parameters()))
         dist.barrier()
 
-
+    # Sampling
     def eval_psnr(self):
         self.ddp_model.eval()
         self.ddp_model.use_checkpoint = False
         device = dist_util.dev()
         
-        psnr_metric    = PeakSignalNoiseRatio().to(device)
+        psnr_metric    = PeakSignalNoiseRatio(data_range=1.0).to(device)
         psnr_sum_NFE1  = torch.tensor(0.0, device=device)
         psnr_sum_NFE3  = torch.tensor(0.0, device=device)
         psnr_sum_NFE10 = torch.tensor(0.0, device=device)
@@ -400,7 +400,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=0,
+                            steps=1,
                             model_kwargs=cond,
                         )
                         # NFE=3
@@ -410,7 +410,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=2,
+                            steps=3,
                             model_kwargs=cond,
                         )
                         # NFE=10
@@ -420,7 +420,7 @@ class TrainLoop:
                             x_T=xT,
                             x_0=None,
                             sampler="InDI",
-                            steps=9,
+                            steps=10,
                             model_kwargs=cond,
                         )
                     B = gt.shape[0]
