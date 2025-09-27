@@ -320,7 +320,6 @@ class CrossAttentionBlock(nn.Module):
         self.q = conv_nd(1, channels, channels, 1)
         self.kv = conv_nd(1, channels, channels*2, 1)
         
-        # TODO: use_new_attention_order=True, need to change "not" 
         if use_new_attention_order:
             self.attention = QKVCrossAttention(self.num_heads)
         else:
@@ -1094,8 +1093,8 @@ class NAFNetModel(nn.Module):
             conv_nd(dims, in_channels, ch, 3, padding=1))])
         
 
-        self.input_cond_blocks = nn.ModuleList([
-            conv_nd(dims, 2, ch, 3, padding=1)])
+        self.input_cond_blocks = nn.ModuleList([TimestepEmbedSequential(
+            conv_nd(dims, 2, ch, 3, padding=1))])
         
         self.attn_blocks = nn.ModuleList([])
         self.middle_blocks = nn.ModuleList([])
@@ -1113,14 +1112,15 @@ class NAFNetModel(nn.Module):
                         use_checkpoint=use_checkpoint,
                     )
                 ))
-                self.input_cond_blocks.append(
-                    SARBlock(
+                self.input_cond_blocks.append(TimestepEmbedSequential(
+                    NAFBlock(
                         ch,
+                        time_embed_dim,
                         drop_out_rate=dropout,
                         use_scale_shift_norm=use_scale_shift_norm,
                         use_checkpoint=use_checkpoint,
                     )
-                )
+                ))
             self.attn_blocks.append(
                 DBCRCrossAttentionBlock(
                     ch, 
@@ -1134,9 +1134,9 @@ class NAFNetModel(nn.Module):
                 conv_nd(dims, ch, ch * 2, 2, 2)
             ))
             if idx != len(enc_blk_nums) - 1:
-                self.input_cond_blocks.append(
+                self.input_cond_blocks.append(TimestepEmbedSequential(
                     conv_nd(dims, ch, ch * 2, 2, 2)
-                )
+                ))
             ch = ch * 2
 
         # Middle
@@ -1197,13 +1197,13 @@ class NAFNetModel(nn.Module):
         s = y.to(self.dtype)
         # input embedding
         h = self.input_blocks[0](h, emb)
-        s = self.input_cond_blocks[0](s)
+        s = self.input_cond_blocks[0](s, emb)
 
         enc = 1
         for i, num in enumerate(self.enc_blk_nums):
             for _ in range(num*self.num_naf_blocks):
                 h = self.input_blocks[enc](h, emb)
-                s = self.input_cond_blocks[enc](s)
+                s = self.input_cond_blocks[enc](s, emb)
                 enc += 1
 
             # cross-attention
@@ -1212,7 +1212,7 @@ class NAFNetModel(nn.Module):
             # downsampling
             h = self.input_blocks[enc](h, emb)
             if i != len(self.enc_blk_nums) - 1:
-                s = self.input_cond_blocks[enc](s)
+                s = self.input_cond_blocks[enc](s, emb)
             enc += 1
 
         for modules in self.middle_blocks:
@@ -1230,60 +1230,3 @@ class NAFNetModel(nn.Module):
         h = h.to(x.dtype)
         
         return h
-
-
-if __name__=="__main__":
-    
-    import torch
-    from torchinfo import summary
-    from ddbm.unet import UNetModel, NAFNetModel
-
-    # model = UNetModel(
-    #     image_size=256,
-    #     in_channels=13,
-    #     model_channels=64,
-    #     out_channels=13,
-    #     num_res_blocks=2,
-    #     attention_resolutions=[16,8,4],
-    #     dropout=0.1,
-    #     channel_mult=(1, 1, 2, 2, 4, 4),
-    #     conv_resample=True,
-    #     dims=2,
-    #     num_classes=None,
-    #     use_checkpoint=True,
-    #     use_fp16=False,
-    #     num_heads=4,
-    #     num_head_channels=64,
-    #     num_heads_upsample=-1,
-    #     use_scale_shift_norm=False,
-    #     resblock_updown=True,
-    #     use_new_attention_order=True,
-    #     condition_mode=None,
-    # )
-
-    model = NAFNetModel(
-        image_size=256,
-        in_channels=13,
-        model_channels=22,
-        out_channels=13,
-        num_naf_blocks=1,
-        dropout=0,
-        middle_blk_num=1,
-        enc_blk_nums=[1,1,1,28],
-        dec_blk_nums=[1,1,1,1],
-        dims=2,
-        num_classes=None,
-        use_checkpoint=False,
-        use_fp16=False,
-        use_scale_shift_norm=False,
-        condition_mode=None,
-        use_new_attention_order=True,
-        num_heads=4,
-        num_head_channels=16,   
-    )
-    x = torch.randn(2, 4, 256, 256)
-    t = torch.tensor([0, 0])
-    y = torch.randn(2, 2, 256, 256)
-
-    summary(model, input_data={'x':x, 'timesteps':t, 'y':y}, depth=4)
-    print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")

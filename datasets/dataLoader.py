@@ -33,9 +33,12 @@ def process_MS(img):
     return img
 
 def process_SAR(img):
-    dB_min, dB_max = -25, 0
-    img = np.clip(img, dB_min, dB_max)
-    img = rescale(img, dB_min, dB_max)
+    # dB_min, dB_max = -25, 0
+    # img = np.clip(img, dB_min, dB_max)
+    # img = rescale(img, dB_min, dB_max)
+    dB_min, dB_max = [-25.0, -32.5], [0, 0]
+    img = np.concatenate([(2 * (np.clip(img[0], dB_min[0], dB_max[0]) - dB_min[0]) / (dB_max[0] - dB_min[0]))[None, ...],
+                          (2 * (np.clip(img[1], dB_min[1], dB_max[1]) - dB_min[1]) / (dB_max[1] - dB_min[1]))[None, ...]], axis=0)
     img = np.nan_to_num(img)
     return img
 

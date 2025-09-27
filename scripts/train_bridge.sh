@@ -13,9 +13,12 @@ source scripts/args.sh $DATASET_NAME
 # 10: [0, 1]
 # 11: [-1, 1]
 # SAR - time_embed None: SN
+# Sampler: Sine/Uniform
+# normalization: DBCR [-32.5, -25]
+# -MHA-BS32-11-SN-SINE-DBCR
 
-FREQ_SAVE_ITER=3820
-EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10-SN
+FREQ_SAVE_ITER=7639
+EXP=${DATASET_NAME}-${TRAIN_MODE}-16
 
 # CKPT=assets/ckpts/256x256_diffusion_fixedsigma.pt
 
@@ -27,11 +30,11 @@ EXP=${DATASET_NAME}-${TRAIN_MODE}-MHA-BS32-10-SN
 #           --master_port $MASTER_PORT \
 #           --nnodes $WORLD_SIZE"
 # For local
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 run_args="--nproc_per_node 1 \
-          --master_port 29501"
+          --master_port 29511"
 
-MICRO_BS=32
+MICRO_BS=16
 
 
 torchrun $run_args train.py --exp=$EXP \

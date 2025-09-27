@@ -15,7 +15,7 @@ from .nn import update_ema
 
 from ddbm.random_util import get_generator
 from ddbm.karras_diffusion import karras_sample
-from torchmetrics import PeakSignalNoiseRatio
+from torchmetrics.image import PeakSignalNoiseRatio
 
 
 import glob
@@ -46,7 +46,7 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        total_training_steps=19100,
+        total_training_steps=381950,
         augment_pipe=None,
         train_mode="ddbm",
         resume_train_flag=False,
@@ -224,13 +224,6 @@ class TrainLoop:
                             logger.logkv(k, v)
                     logs = logger.dumpkvs()
 
-                # Debug
-                if self.step == 80221:
-                    psnr_val = self.eval_psnr()
-                    if isinstance(psnr_val, dict):
-                        for k, v in psnr_val.items():
-                            logger.logkv(k, v)
-                    logs = logger.dumpkvs()
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -365,20 +358,20 @@ class TrainLoop:
         dist.barrier()
 
     # Sampling
+    @torch.no_grad()
     def eval_psnr(self):
         self.ddp_model.eval()
         self.ddp_model.use_checkpoint = False
         device = dist_util.dev()
+
+        psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(device)
         
-        psnr_metric    = PeakSignalNoiseRatio(data_range=1.0).to(device)
         psnr_sum_NFE1  = torch.tensor(0.0, device=device)
-        psnr_sum_NFE3  = torch.tensor(0.0, device=device)
-        psnr_sum_NFE10 = torch.tensor(0.0, device=device)
         n_local        = torch.tensor(0, device=device, dtype=torch.long)
         with torch.inference_mode():
                 for test_batch, test_cond, _ in self.test_data:
                     sar, pdx = _
-                    gt = test_batch.to(device, non_blocking=True).clamp(0, 1)
+                    gt = test_batch.to(device, non_blocking=True)
                     sar = sar.to(device, non_blocking=True)
 
                     if isinstance(test_cond, torch.Tensor) and test_batch.ndim == test_cond.ndim:
@@ -392,58 +385,29 @@ class TrainLoop:
                         else:
                             cond["xT"] = cond["xT"].to(device, non_blocking=True)
                         cond["y"] = sar
+
                     with torch.cuda.amp.autocast(enabled=True):
                         # NFE=1
                         pred_NFE1, *_ = karras_sample(
                             diffusion=self.diffusion,
                             model=self.ddp_model,
-                            x_T=xT,
+                            x_T=cond["xT"],
                             x_0=None,
                             sampler="InDI",
                             steps=1,
                             model_kwargs=cond,
                         )
-                        # NFE=3
-                        pred_NFE3, *_ = karras_sample(
-                            diffusion=self.diffusion,
-                            model=self.ddp_model,
-                            x_T=xT,
-                            x_0=None,
-                            sampler="InDI",
-                            steps=3,
-                            model_kwargs=cond,
-                        )
-                        # NFE=10
-                        pred_NFE10, *_ = karras_sample(
-                            diffusion=self.diffusion,
-                            model=self.ddp_model,
-                            x_T=xT,
-                            x_0=None,
-                            sampler="InDI",
-                            steps=10,
-                            model_kwargs=cond,
-                        )
-                    B = gt.shape[0]
-
                     # pre
+                    gt_f       = gt.clamp(0, 1).float()
                     pred_NFE1  = pred_NFE1.clamp(0, 1).float()
-                    pred_NFE3  = pred_NFE3.clamp(0, 1).float()
-                    pred_NFE10 = pred_NFE10.clamp(0, 1).float()
-                    gt_f       = gt.float()
-
+                    B = gt.shape[0]
+                    
                     # psnr
                     psnr_sum_NFE1 += psnr_metric(pred_NFE1, gt_f) * B
-                    psnr_sum_NFE3 += psnr_metric(pred_NFE3, gt_f) * B
-                    psnr_sum_NFE10 += psnr_metric(pred_NFE10, gt_f) * B
                     n_local += B
-        n = n_local.clamp(min=1).float()
-        psnr_avg_NFE1  = (psnr_sum_NFE1 / n).item()
-        psnr_avg_NFE3  = (psnr_sum_NFE3 / n).item()
-        psnr_avg_NFE10 = (psnr_sum_NFE10 / n).item()
 
-        psnr = {"psnr_NFE1": psnr_avg_NFE1, 
-                "psnr_NFE3": psnr_avg_NFE3,
-                "psnr_NFE10": psnr_avg_NFE10,}
+        n = n_local.clamp(min=1).float()
+        psnr = {"psnr_NFE1": (psnr_sum_NFE1 / n).item()}
 
         self.ddp_model.train()
         return psnr

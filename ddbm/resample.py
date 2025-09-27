@@ -1,4 +1,5 @@
 import torch
+import math
 
 
 def create_named_schedule_sampler(name, diffusion):
@@ -12,6 +13,8 @@ def create_named_schedule_sampler(name, diffusion):
         return RealUniformSampler(diffusion)
     elif name == "InDI-uniform":
         return InDIUniformSampler(diffusion)
+    elif name == "InDI-Sine":
+        return InDISineSampler(diffusion)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -25,9 +28,9 @@ class RealUniformSampler:
         ts = torch.rand(batch_size).to(device) * (self.t_max - self.t_min) + self.t_min
         return ts, torch.ones_like(ts)
 
-# TODO:
 class InDIUniformSampler:
     def __init__(self, diffusion, num_steps=1001, dtype=torch.float32):
+        print("Sampler: InDIUniformSampler")
         self.t_max = diffusion.t_max
         self.t_min = diffusion.t_min
         self.num_steps = num_steps
@@ -41,4 +44,21 @@ class InDIUniformSampler:
         idx = torch.randint(0, self.num_steps, (batch_size,), device=device)
         ts = self.grid.index_select(0, idx)
         return ts, torch.ones_like(ts)
-    
+
+class InDISineSampler:
+    def __init__(self, diffusion, num_steps=1001, dtype=torch.float32):
+        print("Sampler: InDISineSampler")
+        self.t_max = diffusion.t_max
+        self.t_min = diffusion.t_min
+        self.num_steps = num_steps
+
+        u = torch.linspace(0, 1, self.num_steps, dtype=dtype)
+        self.grid = torch.sin(u * math.pi / 2)
+
+    def sample(self, batch_size, device):
+        
+        self.grid = self.grid.to(device)
+
+        idx = torch.randint(0, self.num_steps, (batch_size, ), device=device)
+        ts = self.grid.index_select(0, idx)
+        return ts, torch.ones_like(ts)

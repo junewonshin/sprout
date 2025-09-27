@@ -82,8 +82,8 @@ elif [[ $DATASET_NAME == "sen12mscr" ]]; then
     ATTN_TYPE=True
 
     EXP="sen12mscr${IMG_SIZE}_${NUM_CH}d"
-    SAVE_ITER=19100
-    MICRO_BS=32
+    SAVE_ITER=38195
+    MICRO_BS=16
     DROPOUT=0
     CLASS_COND=False
     UNET_TYPE="naf"
